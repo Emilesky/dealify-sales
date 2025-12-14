@@ -169,37 +169,7 @@ def parse_amount(value: Any) -> float:
         return 0.0
 
 
-def get_latest_csv(data_dir: str, name_contains: str = "pipeline") -> str:
-    """Zoek de nieuwste CSV in /data die `name_contains` in de bestandsnaam bevat."""
-    if not data_dir:
-        raise RuntimeError("[pipeline] data_dir is leeg. Verwacht een geldige data directory.")
 
-    print(f"[pipeline] Zoek nieuwste CSV in: {data_dir} met patroon: '{name_contains}'")
-    files = [
-        f for f in os.listdir(data_dir)
-        if f.lower().endswith(".csv") and name_contains.lower() in f.lower()
-    ]
-
-    if not files:
-        raise FileNotFoundError(
-            f"Geen CSV-bestanden gevonden in {data_dir} met '{name_contains}' in de naam"
-        )
-
-    files_with_time = [
-        (f, os.path.getmtime(os.path.join(data_dir, f)))
-        for f in files
-    ]
-    latest_file = max(files_with_time, key=lambda x: x[1])[0]
-    print(f"[pipeline] Nieuwste pipeline CSV gevonden: {latest_file}")
-    return os.path.join(data_dir, latest_file)
-
-
-def load_csv(path: str) -> pd.DataFrame:
-    """Laad de CSV in een DataFrame."""
-    print(f"[pipeline] CSV laden: {path}")
-    df = pd.read_csv(path, encoding="utf-8-sig")
-    print(f"[pipeline] CSV geladen met {len(df)} regels en {len(df.columns)} kolommen")
-    return df
 
 
 def classify_stage(stage: Any) -> str:
