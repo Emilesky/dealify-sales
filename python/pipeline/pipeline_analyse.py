@@ -13,7 +13,23 @@ import pandas as pd
 
 from python.pipeline.mapping import load_mapping, map_dataframe, MappingError
 from python.app.config import load_config, get_llm_config
+
 from python.pipeline.next_step_health import evaluate_next_steps_batch
+from python.pipeline.constants import (
+    COL_ACCOUNT,
+    COL_OPPORTUNITY,
+    COL_STAGE,
+    COL_FORECAST_CATEGORY,
+    COL_AMOUNT,
+    COL_CLOSE_DATE,
+    COL_CREATED_DATE,
+    COL_AE,
+    COL_NEXT_STEPS,
+    COL_AMOUNT_CLEAN,
+    COL_CLOSE_DATE_PARSED,
+    COL_STAGE_CLASS,
+    SF_EXPORT_TO_CANONICAL,
+)
 
 
 # === Fiscal Quarter Helper ===
@@ -73,34 +89,6 @@ class AnalysisContext:
 # Default mapping file relative to project root
 DEFAULT_PIPELINE_MAPPING = "mappings/salesforce_pipeline.json"
 
-# === Canonical kolomnamen (CRM-agnostic) ===
-COL_ACCOUNT = "account_name"
-COL_OPPORTUNITY = "opportunity_name"
-COL_STAGE = "stage"
-COL_FORECAST_CATEGORY = "forecast_category"
-COL_AMOUNT = "amount"
-COL_CLOSE_DATE = "close_date"
-COL_CREATED_DATE = "created_date"
-COL_AE = "ae_name"
-COL_NEXT_STEPS = "next_steps"
-
-# Interne afgeleide kolommen
-COL_AMOUNT_CLEAN = "amount_clean"
-COL_CLOSE_DATE_PARSED = "close_date_parsed"
-COL_STAGE_CLASS = "stage_class"
-
-# Salesforce-export fallback (alleen gebruikt als mapping niet toegepast wordt)
-SF_EXPORT_TO_CANONICAL: Dict[str, str] = {
-    "Account Name": COL_ACCOUNT,
-    "Opportunity Name": COL_OPPORTUNITY,
-    "Stages": COL_STAGE,
-    "Forecast Category": COL_FORECAST_CATEGORY,
-    "Amount": COL_AMOUNT,
-    "Close Date": COL_CLOSE_DATE,
-    "Created Date": COL_CREATED_DATE,
-    "Sales Person Name": COL_AE,
-    "Next Steps": COL_NEXT_STEPS,
-}
 
 
 # === Helpers ===
