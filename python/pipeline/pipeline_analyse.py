@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
 import re
 import argparse
 from datetime import datetime, date, timedelta
@@ -30,7 +29,13 @@ from python.pipeline.constants import (
     COL_STAGE_CLASS,
     SF_EXPORT_TO_CANONICAL,
 )
-
+from python.pipeline.io import (
+    get_latest_csv,
+    load_csv,
+    write_reports,
+    write_management_data,
+    write_management_summary,
+)
 
 # === Fiscal Quarter Helper ===
 
@@ -211,7 +216,7 @@ def classify_stage(stage: Any) -> str:
 
 # === Analyse-fase ===
 
-def run_analysis(ctx: AnalysisContext, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def run_analysis(ctx: AnalysisContext, df: pd.DataFrame, enable_llm: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Bereid de data voor:
     - Amount opschonen
@@ -268,6 +273,10 @@ def run_analysis(ctx: AnalysisContext, df: pd.DataFrame) -> Tuple[pd.DataFrame, 
         & ~df[COL_FORECAST_CATEGORY].str.contains("Omitted", case=False, na=False)
     ].copy()
     print(f"[pipeline] Actieve pipeline deals (excl. Bookings/Omitted): {len(active_df)}")
+    if not enable_llm:
+        print("[pipeline] LLM Next Step health verrijking is uitgeschakeld (--no-llm).")
+        return active_df, bookings_df, omitted_df
+
     print("[pipeline] Start LLM Next Step health verrijking op actieve pipeline...")
     llm_cfg = ctx.llm_config
     scoring_model = getattr(llm_cfg, "model", None)
@@ -881,68 +890,6 @@ def build_management_data(
     return data
 
 
-# === Output schrijven ===
-
-def ensure_output_dir(output_dir: str) -> None:
-    if not output_dir:
-        raise RuntimeError("[pipeline] output_dir is leeg. Verwacht een geldige output directory.")
-    print(f"[pipeline] Zorg dat output directory bestaat: {output_dir}")
-    os.makedirs(output_dir, exist_ok=True)
-
-
-def write_management_data(data: Dict[str, Any], output_dir: str) -> None:
-    """Schrijf de gestructureerde management data naar JSON (timestamped en latest)."""
-    if not output_dir:
-        raise RuntimeError("[pipeline] output_dir is leeg. Verwacht een geldige output directory.")
-
-    print("[pipeline] Schrijf management data naar JSON")
-    ensure_output_dir(output_dir)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    ts_file = os.path.join(output_dir, f"pipeline_management_data_{ts}.json")
-    latest_file = os.path.join(output_dir, "pipeline_management_data_latest.json")
-
-    with open(ts_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-    with open(latest_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def write_reports(text: str, output_dir: str) -> None:
-    if not output_dir:
-        raise RuntimeError("[pipeline] output_dir is leeg. Verwacht een geldige output directory.")
-
-    print("[pipeline] Schrijf rapporten naar bestanden (timestamped en latest)")
-    ensure_output_dir(output_dir)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    ts_file = os.path.join(output_dir, f"ae_pipeline_summary_{ts}.txt")
-    latest_file = os.path.join(output_dir, "ae_pipeline_summary_latest.txt")
-
-    with open(ts_file, "w", encoding="utf-8") as f:
-        f.write(text)
-
-    with open(latest_file, "w", encoding="utf-8") as f:
-        f.write(text)
-
-
-def write_management_summary(text: str, output_dir: str) -> None:
-    if not output_dir:
-        raise RuntimeError("[pipeline] output_dir is leeg. Verwacht een geldige output directory.")
-
-    print("[pipeline] Schrijf management summary naar bestanden (timestamped en latest)")
-    ensure_output_dir(output_dir)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    ts_file = os.path.join(output_dir, f"management_summary_{ts}.txt")
-    latest_file = os.path.join(output_dir, "management_summary_latest.txt")
-
-    with open(ts_file, "w", encoding="utf-8") as f:
-        f.write(text)
-
-    with open(latest_file, "w", encoding="utf-8") as f:
-        f.write(text)
 
 
 # === main ===
@@ -972,6 +919,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Override de 'vandaag' datum voor reproduceerbare runs. Formaat: YYYY-MM-DD",
+    )
+    parser.add_argument(
+        "--no-llm",
+        "--skip-llm",
+        action="store_true",
+        help="Sla de LLM Next Step health verrijking over (sneller, geen Ollama/SaaS nodig).",
     )
     return parser.parse_args()
 
@@ -1056,7 +1009,7 @@ def main() -> None:
         if missing:
             print(f"[pipeline][WAARSCHUWING] Niet alle canonical kolommen aanwezig na fallback canonicalize: {missing}")
 
-    active_df, bookings_df, omitted_df = run_analysis(ctx, df)
+    active_df, bookings_df, omitted_df = run_analysis(ctx, df, enable_llm=not args.no_llm)
     management_data = build_management_data(ctx, active_df, bookings_df, omitted_df)
 
     report_text = build_ae_reports(ctx, active_df, bookings_df, omitted_df)
