@@ -1,23 +1,17 @@
 from __future__ import annotations
 
 import os
-import re
 import argparse
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from pathlib import Path
-from typing import Dict, List, Any, Tuple, Optional
 from dataclasses import dataclass
+from typing import Any, Dict
 
 import pandas as pd
 
-from python.pipeline.mapping import load_mapping, map_dataframe, MappingError
 from python.app.config import load_config, get_llm_config
-from python.pipeline.analysis import (
-    extract_health_score,
-    parse_amount,
-    classify_stage,
-    run_analysis,
-)
+from python.pipeline.mapping import load_mapping, map_dataframe
+from python.pipeline.analysis import run_analysis
 from python.pipeline.constants import (
     COL_ACCOUNT,
     COL_OPPORTUNITY,
@@ -28,9 +22,6 @@ from python.pipeline.constants import (
     COL_CREATED_DATE,
     COL_AE,
     COL_NEXT_STEPS,
-    COL_AMOUNT_CLEAN,
-    COL_CLOSE_DATE_PARSED,
-    COL_STAGE_CLASS,
     SF_EXPORT_TO_CANONICAL,
 )
 from python.pipeline.io import (
@@ -38,51 +29,18 @@ from python.pipeline.io import (
     load_csv,
     write_reports,
     write_management_data,
-    write_management_summary,
 )
 from python.pipeline.reports import build_ae_reports
-# === Fiscal Quarter Helper ===
-
-def get_fiscal_quarter_bounds(today: date) -> Tuple[date, date]:
-    """Return fiscal quarter bounds based on config calendar (default FY start 1 Feb)."""
-    cal = _get_calendar_cfg()
-    fy_start_month = cal["fiscal_year_start_month"]
-    fy_start_day = cal["fiscal_year_start_day"]
-
-    this_year_start = date(today.year, fy_start_month, fy_start_day)
-    if today < this_year_start:
-        fy_start = date(today.year - 1, fy_start_month, fy_start_day)
-    else:
-        fy_start = this_year_start
-
-    def add_months(d: date, months: int) -> date:
-        y = d.year + (d.month - 1 + months) // 12
-        m = (d.month - 1 + months) % 12 + 1
-        from calendar import monthrange
-        day = min(d.day, monthrange(y, m)[1])
-        return date(y, m, day)
-
-    month_offset = (today.year - fy_start.year) * 12 + (today.month - fy_start.month)
-    q_index = month_offset // 3
-    if q_index < 0:
-        q_index = 0
-    if q_index > 3:
-        q_index = 3
-
-    q_start = add_months(fy_start, q_index * 3)
-    q_end = add_months(fy_start, q_index * 3 + 3) - timedelta(days=1)
-    return q_start, q_end
+from python.pipeline.management import build_management_data
 
 
-# === Pad-config (via config.json) ===
-# Wordt gezet in main()
+DEFAULT_PIPELINE_MAPPING = "mappings/salesforce_pipeline.json"
 
-# data_dir and output_dir are resolved in main() and passed via AnalysisContext
 CALENDAR_CFG: Dict[str, Any] = {}
 RULES_CFG: Dict[str, Any] = {}
 
 
-@dataclass(frozen=True)
+@dataclass
 class AnalysisContext:
     today: date
     data_dir: str
@@ -94,429 +52,23 @@ class AnalysisContext:
     llm_config: Any
 
 
-# === Mapping (CRM-agnostic) ===
-# Default mapping file relative to project root
-DEFAULT_PIPELINE_MAPPING = "mappings/salesforce_pipeline.json"
-
-
-
-# === Helpers ===
 def _get_calendar_cfg() -> Dict[str, Any]:
+    # Defaults are safe fallbacks
+    cal = CALENDAR_CFG or {}
     return {
-        "fiscal_year_start_month": int(CALENDAR_CFG.get("fiscal_year_start_month", 2)),
-        "fiscal_year_start_day": int(CALENDAR_CFG.get("fiscal_year_start_day", 1)),
+        "fiscal_year_start_month": int(cal.get("fiscal_year_start_month", 2)),
+        "fiscal_year_start_day": int(cal.get("fiscal_year_start_day", 1)),
     }
 
 
 def _get_rules_cfg() -> Dict[str, Any]:
+    rules = RULES_CFG or {}
     return {
-        "horizon_days_short": int(RULES_CFG.get("horizon_days_short", 14)),
-        "horizon_days_medium": int(RULES_CFG.get("horizon_days_medium", 30)),
-        "next_step_low_score_threshold": float(RULES_CFG.get("next_step_low_score_threshold", 5.0)),
+        "next_step_low_score_threshold": float(rules.get("next_step_low_score_threshold", 5.0)),
+        "horizon_days_short": int(rules.get("horizon_days_short", 14)),
+        "horizon_days_medium": int(rules.get("horizon_days_medium", 30)),
     }
 
-
-
-
-# === Management data JSON output ===
-
-def build_management_data(
-    ctx: AnalysisContext,
-    active_df: pd.DataFrame,
-    bookings_df: pd.DataFrame,
-    omitted_df: pd.DataFrame,
-) -> Dict[str, Any]:
-    """Bouw een gestructureerde management dataset (voor LLM en dashboards)."""
-    print("[pipeline] Start build_management_data()")
-    data: Dict[str, Any] = {}
-
-    team_total_pipeline = active_df[COL_AMOUNT_CLEAN].sum()
-    team_commit = active_df.loc[active_df[COL_STAGE_CLASS] == "commit", COL_AMOUNT_CLEAN].sum()
-    team_upside = active_df.loc[active_df[COL_STAGE_CLASS] == "upside", COL_AMOUNT_CLEAN].sum()
-    team_green = active_df.loc[active_df[COL_STAGE_CLASS] == "green upside", COL_AMOUNT_CLEAN].sum()
-
-    nr_active_deals = len(active_df)
-    overdue_mask = active_df[COL_CLOSE_DATE_PARSED].notna() & (active_df[COL_CLOSE_DATE_PARSED] < ctx.today)
-    nr_overdue_deals = int(overdue_mask.sum())
-
-    no_next_step_mask = active_df[COL_NEXT_STEPS].isna() | (active_df[COL_NEXT_STEPS].astype(str).str.strip() == "")
-    nr_deals_no_next_step = int(no_next_step_mask.sum())
-
-    nr_deals_amount_zero = int((active_df[COL_AMOUNT_CLEAN] <= 0).sum())
-
-    health_scores: List[float] = []
-    for _, deal in active_df.iterrows():
-        score_val = extract_health_score(deal.get("next_step_health"))
-        if score_val is not None:
-            health_scores.append(score_val)
-    avg_next_step_health = sum(health_scores) / len(health_scores) if health_scores else None
-
-    data["team_overview"] = {
-        "total_pipeline": float(team_total_pipeline),
-        "commit": float(team_commit),
-        "upside": float(team_upside),
-        "green_upside": float(team_green),
-        "nr_active_deals": int(nr_active_deals),
-        "nr_overdue_deals": int(nr_overdue_deals),
-        "nr_deals_no_next_step": int(nr_deals_no_next_step),
-        "nr_deals_amount_zero": int(nr_deals_amount_zero),
-        "avg_next_step_health": float(avg_next_step_health) if avg_next_step_health is not None else None,
-    }
-
-    time_buckets: Dict[str, Any] = {}
-    if COL_CLOSE_DATE_PARSED in active_df.columns:
-        rules = ctx.rules
-        horizon_14 = ctx.today + timedelta(days=rules["horizon_days_short"])
-        horizon_30 = ctx.today + timedelta(days=rules["horizon_days_medium"])
-
-        def bucket_stats(mask: pd.Series) -> Dict[str, Any]:
-            subset = active_df[mask].copy()
-            if subset.empty:
-                return {
-                    "nr_deals": 0,
-                    "total_amount": 0.0,
-                    "commit_amount": 0.0,
-                    "upside_amount": 0.0,
-                    "avg_next_step_health": None,
-                    "nr_discovery_deals": 0,
-                }
-            total_amount = subset[COL_AMOUNT_CLEAN].sum()
-            commit_amount = subset.loc[subset[COL_STAGE_CLASS] == "commit", COL_AMOUNT_CLEAN].sum()
-            upside_amount = subset.loc[subset[COL_STAGE_CLASS] == "upside", COL_AMOUNT_CLEAN].sum()
-            scores: List[float] = []
-            for _, d in subset.iterrows():
-                score_val = extract_health_score(d.get("next_step_health"))
-                if score_val is not None:
-                    scores.append(score_val)
-            avg_health = sum(scores) / len(scores) if scores else None
-
-            nr_discovery = int(subset[COL_STAGE].isin(["Discovery", "Qualification"]).sum())
-
-            return {
-                "nr_deals": int(len(subset)),
-                "total_amount": float(total_amount),
-                "commit_amount": float(commit_amount),
-                "upside_amount": float(upside_amount),
-                "avg_next_step_health": float(avg_health) if avg_health is not None else None,
-                "nr_discovery_deals": nr_discovery,
-            }
-
-        close_notna = active_df[COL_CLOSE_DATE_PARSED].notna()
-        mask_14 = close_notna & (active_df[COL_CLOSE_DATE_PARSED] >= ctx.today) & (active_df[COL_CLOSE_DATE_PARSED] <= horizon_14)
-        mask_30 = close_notna & (active_df[COL_CLOSE_DATE_PARSED] >= ctx.today) & (active_df[COL_CLOSE_DATE_PARSED] <= horizon_30)
-
-        time_buckets["next_14_days"] = bucket_stats(mask_14)
-        time_buckets["next_30_days"] = bucket_stats(mask_30)
-
-        q_start, q_end = get_fiscal_quarter_bounds(ctx.today)
-        mask_q = close_notna & (active_df[COL_CLOSE_DATE_PARSED] >= q_start) & (active_df[COL_CLOSE_DATE_PARSED] <= q_end)
-        mask_rest_q = mask_q & (~mask_30)
-        time_buckets["rest_of_quarter"] = bucket_stats(mask_rest_q)
-
-    data["time_buckets"] = time_buckets
-
-    quarter_data: Dict[str, Any] = {}
-    if COL_CLOSE_DATE_PARSED in active_df.columns:
-        q_start, q_end = get_fiscal_quarter_bounds(ctx.today)
-
-        mask_q = (
-            active_df[COL_CLOSE_DATE_PARSED].notna()
-            & (active_df[COL_CLOSE_DATE_PARSED] >= q_start)
-            & (active_df[COL_CLOSE_DATE_PARSED] <= q_end)
-        )
-        q_df = active_df[mask_q].copy()
-
-        total_pipeline_q = q_df[COL_AMOUNT_CLEAN].sum()
-        total_commit_q = q_df.loc[q_df[COL_STAGE_CLASS] == "commit", COL_AMOUNT_CLEAN].sum()
-
-        q_sorted = q_df.sort_values(COL_AMOUNT_CLEAN, ascending=False)
-        top10 = q_sorted.head(10)
-        top3 = q_sorted.head(3)
-
-        top10_sum = top10[COL_AMOUNT_CLEAN].sum()
-        top3_sum = top3[COL_AMOUNT_CLEAN].sum()
-
-        quarter_data["total_pipeline_this_quarter"] = float(total_pipeline_q)
-        quarter_data["total_commit_this_quarter"] = float(total_commit_q)
-        quarter_data["top10_sum_amount"] = float(top10_sum)
-        quarter_data["top10_share_of_total"] = float(top10_sum / total_pipeline_q) if total_pipeline_q > 0 else None
-        quarter_data["top3_share_of_total"] = float(top3_sum / total_pipeline_q) if total_pipeline_q > 0 else None
-
-        bookings_in_q = bookings_df.copy()
-        if COL_CLOSE_DATE_PARSED in bookings_in_q.columns:
-            bmask_q = (
-                bookings_in_q[COL_CLOSE_DATE_PARSED].notna()
-                & (bookings_in_q[COL_CLOSE_DATE_PARSED] >= q_start)
-                & (bookings_in_q[COL_CLOSE_DATE_PARSED] <= q_end)
-            )
-            bookings_in_q = bookings_in_q[bmask_q]
-        bookings_amount_q = bookings_in_q[COL_AMOUNT_CLEAN].sum() if not bookings_in_q.empty else 0.0
-
-        if ctx.bookings_to_date_current_quarter > 0:
-            bookings_effective = ctx.bookings_to_date_current_quarter
-            bookings_source = "env_or_cli"
-        else:
-            bookings_effective = bookings_amount_q
-            bookings_source = "calculated_from_bookings_df"
-
-        quarter_data["team_target_current_quarter"] = float(ctx.team_target_current_quarter)
-        quarter_data["bookings_this_quarter"] = float(bookings_effective)
-        quarter_data["bookings_this_quarter_source"] = bookings_source
-
-        gap = ctx.team_target_current_quarter - bookings_effective
-        quarter_data["gap_to_target_vs_booked"] = float(gap)
-
-        coverage = (bookings_effective + total_pipeline_q) / ctx.team_target_current_quarter if ctx.team_target_current_quarter > 0 else None
-        quarter_data["coverage_vs_target"] = float(coverage) if coverage is not None else None
-        quarter_data["pipeline_covering_gap_ratio"] = float(total_pipeline_q / gap) if gap > 0 else None
-
-    data["quarter_concentration"] = quarter_data
-
-    discovery_alerts: Dict[str, Any] = {}
-    if COL_CLOSE_DATE_PARSED in active_df.columns:
-        rules = ctx.rules
-        horizon_14 = ctx.today + timedelta(days=rules["horizon_days_short"])
-        mask_discovery = (
-            active_df[COL_CLOSE_DATE_PARSED].notna()
-            & (active_df[COL_CLOSE_DATE_PARSED] >= ctx.today)
-            & (active_df[COL_CLOSE_DATE_PARSED] <= horizon_14)
-            & (active_df[COL_STAGE].isin(["Discovery", "Qualification"]))
-        )
-        disc_df = active_df[mask_discovery].copy()
-        total_disc_amount = disc_df[COL_AMOUNT_CLEAN].sum() if not disc_df.empty else 0.0
-
-        per_ae: Dict[str, Any] = {}
-        if not disc_df.empty and COL_AE in disc_df.columns:
-            for ae, sub in disc_df.groupby(COL_AE):
-                per_ae[str(ae)] = {
-                    "nr_deals": int(len(sub)),
-                    "total_amount": float(sub[COL_AMOUNT_CLEAN].sum()),
-                }
-
-        discovery_alerts["nr_team_deals"] = int(len(disc_df))
-        discovery_alerts["total_team_amount"] = float(total_disc_amount)
-        discovery_alerts["per_ae"] = per_ae
-
-    data["discovery_hygiene_alerts"] = discovery_alerts
-
-    ae_scorecards: Dict[str, Any] = {}
-    if COL_AE in active_df.columns:
-        rules = ctx.rules
-        horizon_14 = ctx.today + timedelta(days=rules["horizon_days_short"])
-        threshold_score = float(rules["next_step_low_score_threshold"])
-
-        for ae, sub in active_df.groupby(COL_AE):
-            sub = sub.copy()
-            total_pipeline = sub[COL_AMOUNT_CLEAN].sum()
-            commit = sub.loc[sub[COL_STAGE_CLASS] == "commit", COL_AMOUNT_CLEAN].sum()
-            upside = sub.loc[sub[COL_STAGE_CLASS] == "upside", COL_AMOUNT_CLEAN].sum()
-            green = sub.loc[sub[COL_STAGE_CLASS] == "green upside", COL_AMOUNT_CLEAN].sum()
-
-            nr_deals = len(sub)
-            overdue_mask_ae = sub[COL_CLOSE_DATE_PARSED].notna() & (sub[COL_CLOSE_DATE_PARSED] < ctx.today)
-            nr_overdue = int(overdue_mask_ae.sum())
-
-            no_next_step_mask_ae = sub[COL_NEXT_STEPS].isna() | (sub[COL_NEXT_STEPS].astype(str).str.strip() == "")
-            nr_no_next_step = int(no_next_step_mask_ae.sum())
-
-            nr_amount_zero = int((sub[COL_AMOUNT_CLEAN] <= 0).sum())
-
-            disc_soon_mask = (
-                sub[COL_CLOSE_DATE_PARSED].notna()
-                & (sub[COL_CLOSE_DATE_PARSED] >= ctx.today)
-                & (sub[COL_CLOSE_DATE_PARSED] <= horizon_14)
-                & (sub[COL_STAGE].isin(["Discovery", "Qualification"]))
-            )
-            nr_disc_soon = int(disc_soon_mask.sum())
-
-            deals_14_mask = (
-                sub[COL_CLOSE_DATE_PARSED].notna()
-                & (sub[COL_CLOSE_DATE_PARSED] >= ctx.today)
-                & (sub[COL_CLOSE_DATE_PARSED] <= horizon_14)
-            )
-            deals_14 = sub[deals_14_mask].copy()
-
-            deals_14_list: List[Dict[str, Any]] = []
-            if not deals_14.empty:
-                deals_14 = deals_14.sort_values(
-                    by=[COL_CLOSE_DATE_PARSED, COL_AMOUNT_CLEAN],
-                    ascending=[True, False],
-                )
-                for _, d14 in deals_14.iterrows():
-                    score_14 = extract_health_score(d14.get("next_step_health"))
-                    deals_14_list.append({
-                        "account_name": str(d14.get(COL_ACCOUNT, "")),
-                        "opportunity_name": str(d14.get(COL_OPPORTUNITY, "")),
-                        "amount": float(d14.get(COL_AMOUNT_CLEAN, 0.0)),
-                        "stage": str(d14.get(COL_STAGE, "")),
-                        "forecast_category": str(d14.get(COL_FORECAST_CATEGORY, "")),
-                        "close_date": str(d14.get(COL_CLOSE_DATE_PARSED) or ""),
-                        "next_step_health_score": float(score_14) if score_14 is not None else None,
-                    })
-
-            deals_next_14_block = {
-                "nr_deals": int(len(deals_14_list)),
-                "total_amount": float(sum(d["amount"] for d in deals_14_list)),
-                "deals": deals_14_list,
-            }
-
-            scores_ae: List[float] = []
-            lowest_score: Optional[float] = None
-            nr_low_health_next_steps = 0
-            for _, d in sub.iterrows():
-                score_val = extract_health_score(d.get("next_step_health"))
-                if score_val is not None:
-                    scores_ae.append(score_val)
-                    if lowest_score is None or score_val < lowest_score:
-                        lowest_score = score_val
-                    if score_val < threshold_score:
-                        nr_low_health_next_steps += 1
-            avg_health_ae = sum(scores_ae) / len(scores_ae) if scores_ae else None
-
-            largest_deal_amount = float(sub[COL_AMOUNT_CLEAN].max()) if not sub.empty else 0.0
-
-            hygiene_score = 100
-            hygiene_score -= 2 * nr_overdue
-            hygiene_score -= 3 * nr_no_next_step
-            hygiene_score -= 1 * nr_amount_zero
-            hygiene_score -= 2 * nr_disc_soon
-            if avg_health_ae is not None and avg_health_ae < 7:
-                hygiene_score -= int((7 - avg_health_ae) * 3)
-            if hygiene_score < 0:
-                hygiene_score = 0
-
-            sub_sorted = sub.sort_values(COL_AMOUNT_CLEAN, ascending=False).head(5)
-            top5_list: List[Dict[str, Any]] = []
-            for rank, (_, dtop) in enumerate(sub_sorted.iterrows(), start=1):
-                created_raw = dtop.get(COL_CREATED_DATE)
-                created_parsed = None
-                try:
-                    created_parsed = pd.to_datetime(created_raw, errors="coerce").date()
-                except Exception:
-                    created_parsed = None
-
-                age_days = (ctx.today - created_parsed).days if created_parsed else None
-
-                top5_list.append({
-                    "rank": int(rank),
-                    "account_name": str(dtop.get(COL_ACCOUNT, "")),
-                    "opportunity_name": str(dtop.get(COL_OPPORTUNITY, "")),
-                    "amount": float(dtop.get(COL_AMOUNT_CLEAN, 0.0)),
-                    "stage": str(dtop.get(COL_STAGE, "")),
-                    "forecast_category": str(dtop.get(COL_FORECAST_CATEGORY, "")),
-                    "close_date": str(dtop.get(COL_CLOSE_DATE_PARSED) or ""),
-                    "created_date": str(created_parsed) if created_parsed else None,
-                    "age_in_days": int(age_days) if age_days is not None else None,
-                })
-
-            top_5_deals_block = {
-                "nr_deals": int(len(top5_list)),
-                "total_amount": float(sum(d["amount"] for d in top5_list)),
-                "deals": top5_list,
-            }
-
-            issue_deals: List[Dict[str, Any]] = []
-
-            nr_missing_next_step = 0
-            nr_low_health_issues = 0
-            nr_both = 0
-
-            for _, d in sub.iterrows():
-                next_step_text = str(d.get(COL_NEXT_STEPS) or "").strip()
-                has_next_step = bool(next_step_text)
-
-                health_raw = d.get("next_step_health")
-                health_score = extract_health_score(health_raw)
-                health_reason = None
-                if isinstance(health_raw, dict):
-                    health_reason = health_raw.get("reason")
-
-                is_missing = not has_next_step
-                is_low = health_score is not None and health_score < threshold_score
-
-                if is_missing:
-                    nr_missing_next_step += 1
-                if is_low:
-                    nr_low_health_issues += 1
-                if is_missing and is_low:
-                    nr_both += 1
-
-                if is_missing or is_low:
-                    issue_deals.append({
-                        "account_name": str(d.get(COL_ACCOUNT, "")),
-                        "opportunity_name": str(d.get(COL_OPPORTUNITY, "")),
-                        "amount": float(d.get(COL_AMOUNT_CLEAN, 0.0)),
-                        "stage": str(d.get(COL_STAGE, "")),
-                        "forecast_category": str(d.get(COL_FORECAST_CATEGORY, "")),
-                        "close_date": str(d.get(COL_CLOSE_DATE_PARSED) or ""),
-                        "next_step_present": bool(has_next_step),
-                        "next_step_text": next_step_text if has_next_step else None,
-                        "next_step_health_score": float(health_score) if health_score is not None else None,
-                        "next_step_health_reason": str(health_reason) if health_reason else None,
-                        "flags": {
-                            "missing_next_step": bool(is_missing),
-                            "low_health": bool(is_low),
-                        }
-                    })
-
-            next_step_issues_block = {
-                "summary": {
-                    "threshold_score": float(threshold_score),
-                    "nr_deals_missing_next_step": int(nr_missing_next_step),
-                    "nr_deals_low_health": int(nr_low_health_issues),
-                    "nr_deals_both": int(nr_both),
-                },
-                "deals": issue_deals,
-            }
-
-            ae_scorecards[str(ae)] = {
-                "total_pipeline": float(total_pipeline),
-                "commit": float(commit),
-                "upside": float(upside),
-                "green_upside": float(green),
-                "nr_deals": int(nr_deals),
-                "nr_overdue_deals": int(nr_overdue),
-                "nr_deals_no_next_step": int(nr_no_next_step),
-                "nr_deals_amount_zero": int(nr_amount_zero),
-                "nr_discovery_closing_14d": int(nr_disc_soon),
-                "avg_next_step_health": float(avg_health_ae) if avg_health_ae is not None else None,
-                "lowest_next_step_score": float(lowest_score) if lowest_score is not None else None,
-                "nr_low_health_next_steps": int(nr_low_health_next_steps),
-                "largest_deal_amount": float(largest_deal_amount),
-                "hygiene_score": int(hygiene_score),
-                "top_5_deals": top_5_deals_block,
-                "next_step_issues": next_step_issues_block,
-                "deals_next_14_days": deals_next_14_block,
-            }
-
-    data["ae_scorecards"] = ae_scorecards
-
-    sorted_all = active_df.sort_values(COL_AMOUNT_CLEAN, ascending=False)
-    top10 = sorted_all.head(10)
-    top10_list: List[Dict[str, Any]] = []
-    for _, d in top10.iterrows():
-        top10_list.append(
-            {
-                "ae": str(d.get(COL_AE, "")),
-                "account_name": str(d.get(COL_ACCOUNT, "")),
-                "opportunity_name": str(d.get(COL_OPPORTUNITY, "")),
-                "amount": float(d.get(COL_AMOUNT_CLEAN, 0.0)),
-                "stage": str(d.get(COL_STAGE, "")),
-                "forecast_category": str(d.get(COL_FORECAST_CATEGORY, "")),
-                "close_date": str(d.get(COL_CLOSE_DATE_PARSED) or ""),
-                "next_step_health_score": float(extract_health_score(d.get("next_step_health")) or 0.0),
-            }
-        )
-
-    data["top10_deals"] = top10_list
-
-    print("[pipeline] build_management_data() voltooid")
-    return data
-
-
-
-
-# === main ===
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Pipeline analyse voor AE-team")
@@ -536,7 +88,7 @@ def parse_args() -> argparse.Namespace:
         "--mapping",
         type=str,
         default=None,
-        help="Pad naar mapping JSON voor pipeline (default: mappings/salesforce_pipeline.json).",
+        help=f"Pad naar mapping JSON voor pipeline (default: {DEFAULT_PIPELINE_MAPPING}).",
     )
     parser.add_argument(
         "--today",
@@ -557,6 +109,8 @@ def main() -> None:
     print("[pipeline] === Pipeline analyse gestart ===")
 
     cfg = load_config()
+
+    # Keep global config for helper functions (compatible with current setup)
     global CALENDAR_CFG, RULES_CFG
     CALENDAR_CFG = cfg.get("calendar", {}) or {}
     RULES_CFG = cfg.get("rules", {}) or {}
@@ -577,6 +131,7 @@ def main() -> None:
     print("[pipeline] Run tip: python3 -m python.pipeline.pipeline_analyse")
 
     args = parse_args()
+
     # Determine today_value, optionally overridden via --today
     today_value = date.today()
     if args.today:
@@ -598,6 +153,7 @@ def main() -> None:
         print(f"[pipeline] Override BOOKINGS_TO_DATE_CURRENT_QUARTER via CLI: {bookings_to_date_value:,.0f}")
 
     llm_cfg = get_llm_config(cfg)
+
     ctx = AnalysisContext(
         today=today_value,
         data_dir=data_dir or "",
@@ -609,7 +165,7 @@ def main() -> None:
         llm_config=llm_cfg,
     )
 
-    csv_path = get_latest_csv(ctx.data_dir)
+    csv_path = get_latest_csv(ctx.data_dir, name_contains="pipeline")
     df = load_csv(csv_path)
 
     project_root = Path(__file__).resolve().parents[2]
@@ -629,15 +185,18 @@ def main() -> None:
     if not mapping_applied:
         # Fallback: Salesforce export kolommen -> canonical kolommen
         df = df.rename(columns={k: v for k, v in SF_EXPORT_TO_CANONICAL.items() if k in df.columns})
-        missing = [c for c in (COL_ACCOUNT, COL_OPPORTUNITY, COL_STAGE, COL_FORECAST_CATEGORY, COL_AMOUNT, COL_CLOSE_DATE, COL_CREATED_DATE, COL_AE, COL_NEXT_STEPS) if c not in df.columns]
+        required = (COL_ACCOUNT, COL_OPPORTUNITY, COL_STAGE, COL_FORECAST_CATEGORY, COL_AMOUNT, COL_CLOSE_DATE, COL_CREATED_DATE, COL_AE, COL_NEXT_STEPS)
+        missing = [c for c in required if c not in df.columns]
         if missing:
             print(f"[pipeline][WAARSCHUWING] Niet alle canonical kolommen aanwezig na fallback canonicalize: {missing}")
 
     active_df, bookings_df, omitted_df = run_analysis(ctx, df, enable_llm=not args.no_llm)
+
     management_data = build_management_data(ctx, active_df, bookings_df, omitted_df)
 
     report_text = build_ae_reports(ctx, active_df, bookings_df, omitted_df)
     print("[pipeline] AE-rapport klaar, start schrijven naar files...")
+
     write_reports(report_text, ctx.output_dir)
     write_management_data(management_data, ctx.output_dir)
 
