@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Environments
+.venv/
+venv/
+.env
+.conda/
+.envrc
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Outputs / data (jij wil dit meestal niet versionen)
+data/
+outputs/
+
+# Logs
+*.log

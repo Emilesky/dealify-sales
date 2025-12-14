@@ -1,0 +1,27 @@
+{
+  "name": "salesforce_pipeline",
+  "version": 1,
+  "required": [
+    "account_name",
+    "opportunity_name",
+    "stage",
+    "forecast_category",
+    "amount",
+    "close_date",
+    "created_date",
+    "ae_name",
+    "next_steps"
+  ],
+  "columns": {
+    "account_name": ["Account Name", "Account", "AccountName"],
+    "opportunity_name": ["Opportunity Name", "Opportunity", "OpportunityName"],
+    "stage": ["Stages", "Stage"],
+    "forecast_category": ["Forecast Category", "ForecastCategory"],
+    "amount": ["Amount", "Opportunity Amount", "Amount (Converted)"],
+    "close_date": ["Close Date", "CloseDate"],
+    "created_date": ["Created Date", "CreatedDate"],
+    "ae_name": ["Sales Person Name", "Owner", "Opportunity Owner", "Account Executive", "AE"],
+    "next_steps": ["Next Steps", "Next Step", "NextSteps"]
+  },
+  "notes": "Mapping voor Salesforce pipeline export. Arrays laten later alternatieve kolomnamen toe."
+}

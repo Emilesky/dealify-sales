@@ -1,0 +1,34 @@
+{
+  "paths": {
+    "project_root": "",
+    "data_dir": "data",
+    "outputs_dir": "outputs"
+  },
+  "llm": {
+    "backend": "ollama",
+    "ollama_path": "/usr/local/bin/ollama",
+    "model": "llama3.1:8b",
+    "timeout_sec": 180,
+    "retries": 1,
+    "payload_debug_file": "outputs/llm_payload_latest.txt",
+    "litellm": {
+      "provider": "openai",
+      "api_key": "",
+      "api_base": ""
+    }
+  },
+  "run": {
+    "verbose": true,
+    "target": 4500000,
+    "bookings_to_date": 1400000
+  },
+  "calendar": {
+  "fiscal_year_start_month": 2,
+  "fiscal_year_start_day": 1
+},
+"rules": {
+  "horizon_days_short": 14,
+  "horizon_days_medium": 30,
+  "next_step_low_score_threshold": 5.0
+}
+}
