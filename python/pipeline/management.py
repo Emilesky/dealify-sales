@@ -7,22 +7,16 @@ import pandas as pd
 
 from python.pipeline.analysis import extract_health_score
 from python.pipeline.constants import (
-    COL_ACCOUNT,
-    COL_AE,
     COL_AMOUNT_CLEAN,
     COL_CLOSE_DATE_PARSED,
-    COL_CREATED_DATE,
-    COL_FORECAST_CATEGORY,
     COL_NEXT_STEPS,
-    COL_OPPORTUNITY,
-    COL_STAGE,
-    COL_STAGE_CLASS,
 )
 from python.pipeline.management_builders import (
     build_team_overview,
     build_deals_closing_next_14_days,
     build_quarter_concentration,
     build_discovery_hygiene_alerts,
+    build_ae_scorecards,
 )
 
 
@@ -186,8 +180,8 @@ def build_management_snapshot(
 
     # --- FULL SCOPE ---
     if scope == "full":
-        # Placeholders for AE- and deal-level sections
-        data["ae_scorecards"] = {}
+        rules_cfg = _get_rules_cfg()
+        data["ae_scorecards"] = build_ae_scorecards(ctx, active_df, rules_cfg, top_n=5)
         data["top10_deals"] = []
 
     return data
