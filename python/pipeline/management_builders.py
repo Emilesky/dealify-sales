@@ -1,10 +1,10 @@
-"""
-Single module for management aggregations (extended scope).
+"""Single module for management aggregations (extended + full scopes).
+
 No logging/printing here; return JSON-serializable structures only.
 """
 
 from datetime import timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -17,7 +17,6 @@ from python.pipeline.constants import (
     COL_STAGE,
     COL_FORECAST_CATEGORY,
     COL_NEXT_STEPS,
-    COL_STAGE_CLASS,
 )
 from python.pipeline.analysis import extract_health_score
 
@@ -217,3 +216,117 @@ def build_discovery_hygiene_alerts(ctx: Any, active_df: pd.DataFrame, rules_cfg:
         "nr_missing_close_date": nr_missing_close_date,
         "next_step_health": next_step_health,
     }
+
+
+# =========================
+# AE SCORECARDS (FULL)
+# =========================
+
+def build_ae_scorecards(
+    ctx: Any,
+    active_df: pd.DataFrame,
+    rules_cfg: Dict[str, Any],
+    top_n: int = 5,
+) -> Dict[str, Any]:
+    """Build per-AE scorecards (compact) for FULL scope.
+
+    Returns a dict keyed by AE name, each containing pipeline totals, hygiene counts, and top deals.
+    """
+    if active_df is None or active_df.empty:
+        return {}
+
+    if COL_AE not in active_df.columns:
+        return {}
+
+    low_threshold = float(rules_cfg.get("next_step_low_score_threshold", 5.0)) if rules_cfg else 5.0
+    today = getattr(ctx, "today", None)
+
+    scorecards: Dict[str, Any] = {}
+
+    for ae_name, g in active_df.groupby(COL_AE, dropna=False):
+        ae_key = str(ae_name).strip() if ae_name is not None else "(unknown)"
+
+        pipeline_amount = _safe_sum_amount(g)
+        nr_deals = int(len(g))
+
+        # Hygiene counts
+        nr_overdue = 0
+        nr_missing_close_date = 0
+        if COL_CLOSE_DATE_PARSED in g.columns and today is not None:
+            cd = pd.to_datetime(g[COL_CLOSE_DATE_PARSED], errors="coerce")
+            nr_missing_close_date = int(cd.isna().sum())
+            try:
+                nr_overdue = int((cd.notna() & (cd.dt.date < today)).sum())
+            except Exception:
+                nr_overdue = 0
+
+        nr_no_next_step = 0
+        if COL_NEXT_STEPS in g.columns:
+            ns = g[COL_NEXT_STEPS].fillna("").astype(str).str.strip()
+            nr_no_next_step = int((ns == "").sum())
+
+        # Next-step health stats (optional; may be absent when --no-llm)
+        avg_nsh: Optional[float] = None
+        nsh_count = 0
+        nsh_low = 0
+        if "next_step_health" in g.columns:
+            scores: List[float] = []
+            for v in g["next_step_health"].tolist():
+                s = extract_health_score(v)
+                if s is None:
+                    continue
+                scores.append(float(s))
+            nsh_count = len(scores)
+            if nsh_count > 0:
+                avg_nsh = float(sum(scores) / nsh_count)
+                nsh_low = int(sum(1 for s in scores if s < low_threshold))
+
+        hygiene = {
+            "nr_overdue_deals": nr_overdue,
+            "nr_missing_close_date": nr_missing_close_date,
+            "nr_deals_no_next_step": nr_no_next_step,
+            "next_step_health": {
+                "avg": avg_nsh,
+                "count": nsh_count,
+                "low_count": nsh_low,
+            },
+        }
+
+        # Top deals (compact)
+        sort_cols = []
+        ascending = []
+        if COL_AMOUNT_CLEAN in g.columns:
+            sort_cols.append(COL_AMOUNT_CLEAN)
+            ascending.append(False)
+        if COL_OPPORTUNITY in g.columns:
+            sort_cols.append(COL_OPPORTUNITY)
+            ascending.append(True)
+
+        if sort_cols:
+            g2 = g.sort_values(by=sort_cols, ascending=ascending)
+        else:
+            g2 = g
+
+        top_deals_rows = g2.head(int(top_n))
+        top_deals: List[Dict[str, Any]] = []
+        for _, row in top_deals_rows.iterrows():
+            top_deals.append(
+                {
+                    "account_name": row.get(COL_ACCOUNT),
+                    "opportunity_name": row.get(COL_OPPORTUNITY),
+                    "amount": float(row.get(COL_AMOUNT_CLEAN) or 0.0) if COL_AMOUNT_CLEAN in top_deals_rows.columns else 0.0,
+                    "close_date": _safe_iso(row.get(COL_CLOSE_DATE_PARSED)) if COL_CLOSE_DATE_PARSED in top_deals_rows.columns else None,
+                    "stage": row.get(COL_STAGE) if COL_STAGE in top_deals_rows.columns else None,
+                    "forecast_category": row.get(COL_FORECAST_CATEGORY) if COL_FORECAST_CATEGORY in top_deals_rows.columns else None,
+                    "next_steps": row.get(COL_NEXT_STEPS) if COL_NEXT_STEPS in top_deals_rows.columns else None,
+                }
+            )
+
+        scorecards[ae_key] = {
+            "pipeline_amount": float(pipeline_amount),
+            "nr_deals": nr_deals,
+            "hygiene": hygiene,
+            "top_deals": top_deals,
+        }
+
+    return scorecards
