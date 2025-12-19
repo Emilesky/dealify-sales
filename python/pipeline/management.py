@@ -18,6 +18,12 @@ from python.pipeline.constants import (
     COL_STAGE,
     COL_STAGE_CLASS,
 )
+from python.pipeline.management_builders import (
+    build_team_overview,
+    build_deals_closing_next_14_days,
+    build_quarter_concentration,
+    build_discovery_hygiene_alerts,
+)
 
 
 # === Fiscal helpers ===
@@ -137,3 +143,51 @@ def build_management_data(
     }
 
     return management_data
+
+
+def build_management_snapshot(
+    ctx: Any,
+    active_df: pd.DataFrame,
+    bookings_df: pd.DataFrame,
+    omitted_df: pd.DataFrame,
+    scope: str = "management",
+) -> Dict[str, Any]:
+    """
+    Assemble management JSON with variable detail level.
+
+    Scope levels:
+    - management (default): core management metrics only
+    - extended: adds analytical breakdowns (time, concentration, hygiene)
+    - full: adds AE- and deal-level sections
+
+    Design rules:
+    - build_management_data() remains the canonical core
+    - this function only assembles and adds sections
+    - no heavy computation logic here
+    """
+
+    data = build_management_data(ctx, active_df, bookings_df, omitted_df)
+
+    # Always expose the chosen scope for traceability
+    data["output_scope"] = scope
+
+    # --- EXTENDED SCOPE ---
+    if scope in ("extended", "full"):
+        data["team_overview"] = build_team_overview(ctx, active_df, bookings_df, omitted_df)
+
+        fiscal_start, fiscal_end = get_fiscal_quarter_bounds(ctx.today)
+        data["quarter_concentration"] = build_quarter_concentration(ctx, active_df, fiscal_start, fiscal_end)
+
+        rules_cfg = _get_rules_cfg()
+        data["discovery_hygiene_alerts"] = build_discovery_hygiene_alerts(ctx, active_df, rules_cfg)
+
+        horizon_days = rules_cfg.get("horizon_days_short", 14) if rules_cfg else 14
+        data["deals_closing_next_14_days"] = build_deals_closing_next_14_days(ctx, active_df, horizon_days=horizon_days)
+
+    # --- FULL SCOPE ---
+    if scope == "full":
+        # Placeholders for AE- and deal-level sections
+        data["ae_scorecards"] = {}
+        data["top10_deals"] = []
+
+    return data
