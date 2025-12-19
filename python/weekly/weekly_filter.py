@@ -68,39 +68,83 @@ def build_llm_input(data: dict, source_file: str) -> dict:
     quarter_src = data.get("quarter_concentration", {}) or {}
     ae_src = data.get("ae_scorecards", {}) or {}
     top_deals_src = data.get("top_10_deals", []) or []
-    # Optioneel: lijst van individuele deals met close date binnen 14 dagen
-    deals_14d_src = (
-        data.get("deals_closing_next_14_days")
-        or data.get("deals_closing_14d")
-        or []
-    ) or []
+    if not top_deals_src:
+        # Fallback to quarter concentration top deals if overall top_10_deals is not present
+        top_deals_src = quarter_src.get("top5_in_quarter", []) or []
 
-    # Teamoverzicht (compact)
+    hygiene_src = data.get("discovery_hygiene_alerts", {}) or {}
+
     llm_team = {
-        "team_target_current_quarter": quarter_src.get("team_target_current_quarter"),
-        "bookings_to_date_current_quarter": quarter_src.get("bookings_this_quarter"),
-        "gap_to_target": quarter_src.get("gap_to_target_vs_booked"),
-        "coverage_ratio": quarter_src.get("coverage_vs_target"),
-        "pipeline_covering_gap_ratio": quarter_src.get("pipeline_covering_gap_ratio"),
-        "total_pipeline": team_src.get("total_pipeline"),
-        "commit": team_src.get("commit"),
-        "upside": team_src.get("upside"),
-        "green_upside": team_src.get("green_upside"),
-        "nr_active_deals": team_src.get("nr_active_deals"),
-        "nr_overdue_deals": team_src.get("nr_overdue_deals"),
-        "nr_deals_no_next_step": team_src.get("nr_deals_no_next_step"),
+        # New pipeline JSON (team_overview builder)
+        "team_target_current_quarter": team_src.get("target"),
+        "bookings_to_date_current_quarter": team_src.get("bookings_to_date"),
+        "gap_to_target": team_src.get("gap_to_target"),
+        "coverage_ratio": team_src.get("coverage_ratio"),
+        # Backwards/optional fields (not available in new core yet)
+        "pipeline_covering_gap_ratio": None,
+        "total_pipeline": team_src.get("active_pipeline"),
+        "commit": None,
+        "upside": None,
+        "green_upside": None,
+        "nr_active_deals": (team_src.get("counts") or {}).get("nr_active_deals"),
+        "nr_overdue_deals": hygiene_src.get("nr_overdue_deals"),
+        "nr_deals_no_next_step": hygiene_src.get("nr_deals_no_next_step"),
     }
+
+    def _derive_hygiene_score(ae_payload: dict) -> Optional[float]:
+        """Derive a lightweight hygiene score for risk triage.
+
+        New ae_scorecards provide hygiene counts + next_step_health stats, but not a single hygiene_score.
+        We compute a conservative score in [0, 10] so existing weekly_filter thresholds keep working.
+        """
+        hygiene = ae_payload.get("hygiene") or {}
+        nr_overdue = hygiene.get("nr_overdue_deals", 0) or 0
+        nr_no_next_step = hygiene.get("nr_deals_no_next_step", 0) or 0
+        nsh = hygiene.get("next_step_health") or {}
+        avg_nsh = nsh.get("avg")
+        low_nsh = nsh.get("low_count", 0) or 0
+
+        # Base score: if we have an avg next_step_health, start there; else start at 10.
+        base = float(avg_nsh) if avg_nsh is not None else 10.0
+        # Penalties: keep simple and monotonic (no magic)
+        score = base - (0.5 * nr_overdue) - (0.5 * nr_no_next_step) - (1.0 * low_nsh)
+        # Clamp
+        if score < 0:
+            score = 0.0
+        if score > 10:
+            score = 10.0
+        return score
 
     # Per AE: alleen de AE's die echt aandacht vragen (risico-AE's)
     llm_ae_risk: dict[str, dict] = {}
 
     for ae_name, ae in ae_src.items():
+        # Support old ae_scorecards format (flat fields) and new format (nested hygiene + top_deals)
+        hygiene = ae.get("hygiene") or {}
+        nsh = hygiene.get("next_step_health") or {}
+
         hygiene_score = ae.get("hygiene_score")
-        nr_overdue = ae.get("nr_overdue_deals", 0) or 0
-        nr_no_next_step = ae.get("nr_deals_no_next_step", 0) or 0
+        if hygiene_score is None:
+            hygiene_score = _derive_hygiene_score(ae)
+
+        nr_overdue = ae.get("nr_overdue_deals")
+        if nr_overdue is None:
+            nr_overdue = hygiene.get("nr_overdue_deals", 0) or 0
+
+        nr_no_next_step = ae.get("nr_deals_no_next_step")
+        if nr_no_next_step is None:
+            nr_no_next_step = hygiene.get("nr_deals_no_next_step", 0) or 0
+
+        # Not provided by the new builder yet; keep for backward compat
         nr_discovery_14d = ae.get("nr_discovery_closing_14d", 0) or 0
+
         avg_next_step_health = ae.get("avg_next_step_health")
-        nr_low_health_next_steps = ae.get("nr_low_health_next_steps", 0) or 0
+        if avg_next_step_health is None:
+            avg_next_step_health = nsh.get("avg")
+
+        nr_low_health_next_steps = ae.get("nr_low_health_next_steps")
+        if nr_low_health_next_steps is None:
+            nr_low_health_next_steps = nsh.get("low_count", 0) or 0
 
         # Bepaal of deze AE in de "risico" view moet komen
         is_risky = False
@@ -128,7 +172,7 @@ def build_llm_input(data: dict, source_file: str) -> dict:
 
         # Basismetrics per AE
         base = {
-            "total_pipeline": ae.get("total_pipeline"),
+            "total_pipeline": ae.get("total_pipeline") if ae.get("total_pipeline") is not None else ae.get("pipeline_amount"),
             "commit": ae.get("commit"),
             "upside": ae.get("upside"),
             "green_upside": ae.get("green_upside"),
@@ -142,8 +186,15 @@ def build_llm_input(data: dict, source_file: str) -> dict:
         }
 
         # Topdeals per AE (max 2 om payload klein te houden)
-        top_block = ae.get("top_5_deals") or ae.get("top_deals") or {}
-        top_deals = (top_block.get("deals") or [])[:2]
+        top_block = ae.get("top_5_deals") or {}
+        if isinstance(top_block, dict):
+            top_deals = (top_block.get("deals") or [])[:2]
+        else:
+            top_deals = []
+
+        if not top_deals:
+            # New format: top_deals is a list
+            top_deals = (ae.get("top_deals") or [])[:2]
 
         stripped_top_deals = []
         for d in top_deals:
@@ -161,6 +212,8 @@ def build_llm_input(data: dict, source_file: str) -> dict:
 
         # Next-step issues (max 2 deals als sample)
         issues_block = ae.get("next_step_issues") or {}
+        if not isinstance(issues_block, dict):
+            issues_block = {}
         issue_deals = (issues_block.get("deals") or [])[:2]
 
         stripped_issues = []
@@ -200,6 +253,11 @@ def build_llm_input(data: dict, source_file: str) -> dict:
 
     # Deals met close date binnen 14 dagen (max 10, voor week- en 14-dagen-focus)
     llm_deals_14d = []
+    deals_14d_src = (
+        data.get("deals_closing_next_14_days")
+        or data.get("deals_closing_14d")
+        or []
+    ) or []
     for d in deals_14d_src[:10]:
         llm_deals_14d.append({
             "account_name": d.get("account_name"),
