@@ -163,7 +163,7 @@ def build_llm_input(data: dict, source_file: str) -> dict:
             is_risky = True
 
         # Als we al genoeg risico-AE's hebben opgenomen, skip de rest
-        if len(llm_ae_risk) >= MAX_RISK_AE_IN_LLM and not ae_name in llm_ae_risk:
+        if len(llm_ae_risk) >= MAX_RISK_AE_IN_LLM and ae_name not in llm_ae_risk:
             # We hebben al genoeg risico-AE's geregistreerd
             continue
 
