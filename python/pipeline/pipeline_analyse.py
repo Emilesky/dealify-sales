@@ -7,7 +7,6 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Dict
 
-import pandas as pd
 
 from python.app.config import load_config, get_llm_config
 from python.pipeline.mapping import load_mapping, map_dataframe
