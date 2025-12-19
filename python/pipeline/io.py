@@ -1,11 +1,33 @@
-
-
 import json
 import os
+import math
 from datetime import datetime
 from typing import Any, Dict
 
 import pandas as pd
+
+
+def sanitize_for_json(obj: Any) -> Any:
+    """Recursively sanitize objects for strict JSON.
+
+    Python's json module can write NaN/Infinity, which breaks strict JSON parsers (e.g., JSON.parse in JS).
+    Convert NaN/Infinity to None so the output is valid JSON.
+    """
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+
+    if isinstance(obj, list):
+        return [sanitize_for_json(v) for v in obj]
+
+    if isinstance(obj, tuple):
+        return [sanitize_for_json(v) for v in obj]
+
+    return obj
 
 
 def get_latest_csv(data_dir: str, name_contains: str = "pipeline") -> str:
@@ -66,11 +88,12 @@ def _write_json_latest_and_timestamped(data: Dict[str, Any], output_dir: str, la
     latest_path = os.path.join(output_dir, latest_filename)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     ts_path = os.path.join(output_dir, f"{prefix}_{ts}.json")
+    safe_data = sanitize_for_json(data)
 
     with open(latest_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(safe_data, f, indent=2, ensure_ascii=False, allow_nan=False)
     with open(ts_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(safe_data, f, indent=2, ensure_ascii=False, allow_nan=False)
 
     print(f"[pipeline] Output geschreven: {latest_path}")
     print(f"[pipeline] Output geschreven: {ts_path}")
