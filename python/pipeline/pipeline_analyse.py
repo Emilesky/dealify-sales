@@ -31,7 +31,7 @@ from python.pipeline.io import (
     write_management_data,
 )
 from python.pipeline.reports import build_ae_reports
-from python.pipeline.management import build_management_data
+from python.pipeline.management import build_management_snapshot
 
 
 DEFAULT_PIPELINE_MAPPING = "mappings/salesforce_pipeline.json"
@@ -102,6 +102,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Sla de LLM Next Step health verrijking over (sneller, geen Ollama/SaaS nodig).",
     )
+    parser.add_argument(
+        "--output-scope",
+        type=str,
+        choices=["management", "extended", "full"],
+        default="management",
+        help="Bepaalt hoeveel detail in de management JSON wordt opgenomen (default: management).",
+    )
     return parser.parse_args()
 
 
@@ -131,6 +138,8 @@ def main() -> None:
     print("[pipeline] Run tip: python3 -m python.pipeline.pipeline_analyse")
 
     args = parse_args()
+
+    print(f"[pipeline] Output scope (CLI): {args.output_scope}")
 
     # Determine today_value, optionally overridden via --today
     today_value = date.today()
@@ -192,7 +201,13 @@ def main() -> None:
 
     active_df, bookings_df, omitted_df = run_analysis(ctx, df, enable_llm=not args.no_llm)
 
-    management_data = build_management_data(ctx, active_df, bookings_df, omitted_df)
+    management_data = build_management_snapshot(
+        ctx,
+        active_df,
+        bookings_df,
+        omitted_df,
+        scope=args.output_scope,
+    )
 
     report_text = build_ae_reports(ctx, active_df, bookings_df, omitted_df)
     print("[pipeline] AE-rapport klaar, start schrijven naar files...")
