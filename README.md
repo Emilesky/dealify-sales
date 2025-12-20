@@ -8,27 +8,38 @@ De tool is CRM-agnostisch, config-driven en ontworpen om later eenvoudig te embe
 
 Projectstructuur
 
-SalesforceSelenium/
-├─ config.json              # Centrale configuratie (paths, LLM)
-├─ data/                    # Ruwe input (CSV exports)
-├─ outputs/                 # Gegenereerde outputs (JSON, TXT)
-├─ scripts/                 # Ingest / automation (Downloads → data)
-│
+DealifyEngine/
+├─ config.json                 # Centrale configuratie (paths, LLM, calendar, rules)
+├─ data/                       # Ruwe input (CSV exports)
+├─ logs/                       # Run-logs (optioneel)
+├─ mappings/                   # Mapping van CRM-export naar canonieke velden
+├─ models/                     # Prompts/templates (bijv. prompt_next_step_health.txt)
+├─ outputs/                    # Gegenereerde outputs (JSON, TXT)
 ├─ python/
 │  ├─ app/
 │  │  └─ config.py
 │  ├─ llm/
 │  │  └─ client.py
-│  ├─ pipeline/
+│  ├─ pipeline/                # Analyse + managementdata builders
+│  │  ├─ analysis.py
+│  │  ├─ constants.py
+│  │  ├─ io.py
+│  │  ├─ management.py
+│  │  ├─ management_builders.py
+│  │  ├─ mapping.py
+│  │  ├─ next_step_health.py
 │  │  ├─ pipeline_analyse.py
-│  │  └─ next_step_health.py
+│  │  └─ reports.py
 │  ├─ weekly/
 │  │  ├─ weekly_filter.py
 │  │  ├─ management_summary.py
 │  │  └─ weekly_management_scan.py
-│  └─ inspect/
-│     └─ inspect_management_data.py
-│
+│  ├─ inspect/
+│  │  └─ inspect_management_data.py
+│  ├─ scripts/
+│  │  └─ sf_salesforce_dashboard.py
+│  └─ ui/                      # (placeholder)
+├─ migrate_project_structure.py
 └─ README.md
 
 
@@ -56,18 +67,40 @@ Voorbeeld:
 
 {
   "paths": {
-    "outputs_dir_abs": "/Users/you/Automations/SalesforceSelenium/outputs"
+    "data_dir": "data",
+    "outputs_dir": "outputs"
   },
   "llm": {
     "backend": "ollama",
     "model": "llama3.1:8b",
     "timeout_sec": 180,
-    "ollama_path": "/usr/local/bin/ollama"
+    "retries": 1,
+    "ollama_path": "/usr/local/bin/ollama",
+    "payload_debug_file": "outputs/llm_payload_latest.txt",
+    "litellm": {
+      "provider": "openai",
+      "api_key": "",
+      "api_base": ""
+    }
+  },
+  "run": {
+    "verbose": true,
+    "target": 4500000,
+    "bookings_to_date": 1400000
+  },
+  "calendar": {
+    "fiscal_year_start_month": 2,
+    "fiscal_year_start_day": 1
+  },
+  "rules": {
+    "horizon_days_short": 14,
+    "horizon_days_medium": 30,
+    "next_step_low_score_threshold": 5.0
   }
 }
 
 Belangrijk:
-	•	outputs_dir_abs is de single source of truth voor alle output
+	•	paden worden dynamisch als absolute paden ingevuld vanuit config.json (data_dir_abs, outputs_dir_abs)
 	•	Geen paden worden afgeleid uit __file__
 	•	LLM-config wordt centraal geïnjecteerd
 
@@ -128,7 +161,7 @@ python -m python.inspect.inspect_management_data --file /pad/naar/json --team
 
 Scripts (ingest / automation)
 
-Scripts in scripts/ zijn niet bedoeld om geïmporteerd te worden.
+Scripts in python/scripts/ zijn niet bedoeld om geïmporteerd te worden.
 Ze verzorgen alleen aanvoer, bijvoorbeeld:
 	•	CSV’s uit Downloads kopiëren
 	•	Selenium exports
@@ -136,7 +169,7 @@ Ze verzorgen alleen aanvoer, bijvoorbeeld:
 
 Voorbeeld:
 
-python scripts/move_latest_from_downloads.py
+python -m python.scripts.sf_salesforce_dashboard
 
 Analysecode leest altijd uit data/, nooit direct uit Downloads.
 
@@ -154,12 +187,12 @@ Ontwerpprincipes
 Troubleshooting
 
 No module named python.xxx
-	•	Check of je project root (SalesforceSelenium) als folder geopend is
+	•	Check of je project root (DealifyEngine) als folder geopend is
 	•	Controleer of __init__.py aanwezig is in subfolders
 	•	Gebruik altijd python -m python.<module>
 
 outputs_dir_abs ontbreekt
-	•	Voeg "paths.outputs_dir_abs" toe aan config.json
+	•	Voeg "paths.outputs_dir" toe aan config.json (absolute paden worden automatisch afgeleid)
 
 Ollama werkt in terminal maar niet in Python
 	•	Check llm.ollama_path in config.json
