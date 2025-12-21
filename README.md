@@ -121,7 +121,7 @@ Output:
 
 2. Weekly filter
 
-Filtert managementdata naar compacte LLM-input voor de week (risico-AE’s, topdeals, deals met close binnen 14 dagen).
+Filtert managementdata naar compacte LLM-input voor de week (risico account managers, topdeals, deals met close binnen 14 dagen).
 
 python -m python.weekly.weekly_filter
 
@@ -132,7 +132,7 @@ Output:
 
 3. Weekly management scan (LLM)
 
-Genereert een kritische RVP-level managementanalyse op basis van weekly_llm_input_latest.json (+ optionele contextfile).
+Genereert een kritische management-level managementanalyse op basis van weekly_llm_input_latest.json (+ optionele contextfile).
 Schrijft zowel een latest als timestamped variant.
 
 python -m python.weekly.weekly_management_scan
@@ -149,7 +149,7 @@ Output:
 
 Management summary helper (optioneel)
 
-Genereer een samenvatting via Ollama op basis van het AE-rapport + management JSON.
+Genereer een samenvatting via Ollama op basis van het Accountmanager-rapport + management JSON.
 
 python -m python.weekly.management_summary
 
