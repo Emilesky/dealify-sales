@@ -1,20 +1,11 @@
-from python.pipeline.mapping import load_mapping, map_dataframe
-from python.pipeline.analysis import run_analysis
-from python.pipeline.constants import (
-    COL_ACCOUNT,
-    COL_OPPORTUNITY,
-    COL_STAGE,
-    COL_FORECAST_CATEGORY,
-    COL_AMOUNT,
-    COL_CLOSE_DATE,
-    COL_CREATED_DATE,
-    COL_AE,
-    COL_NEXT_STEPS,
-    SF_EXPORT_TO_CANONICAL,
+from python.application.adapters import (
+    FilePipelineSourceAdapter,
+    JsonMappingAdapter,
+    PandasPipelineAnalysisAdapter,
+    DefaultManagementSnapshotAdapter,
+    FileReportWriterAdapter,
+    DefaultAeReportBuilderAdapter,
 )
-from python.pipeline.io import get_latest_csv, load_csv, write_reports, write_management_data
-from python.pipeline.reports import build_ae_reports
-from python.pipeline.management import build_management_snapshot
 
 
 def run_pipeline(ctx, args, mapping_path: str) -> None:
@@ -22,40 +13,34 @@ def run_pipeline(ctx, args, mapping_path: str) -> None:
     Application-level pipeline execution.
     Executes the full pipeline flow given a prepared AnalysisContext and CLI args.
     """
+    # Instantiate adapters
+    source = FilePipelineSourceAdapter(ctx.data_dir)
+    mapper = JsonMappingAdapter()
+    analyzer = PandasPipelineAnalysisAdapter(ctx)
+    snapshot_builder = DefaultManagementSnapshotAdapter()
+    report_builder = DefaultAeReportBuilderAdapter()
+    writer = FileReportWriterAdapter()
 
-    csv_path = get_latest_csv(ctx.data_dir, name_contains="pipeline")
-    df = load_csv(csv_path)
+    # Load data
+    csv_path = source.get_latest_pipeline_path()
+    df = source.load_pipeline(csv_path)
 
-    mapping_applied = False
+    # Apply mapping
     try:
-        mapping = load_mapping(mapping_path)
-        df = map_dataframe(df, mapping)
-        mapping_applied = True
+        df = mapper.apply_mapping(df, mapping_path)
         print("[pipeline] Mapping toegepast. Verwacht canonical kolommen.")
     except Exception as e:
-        print("[pipeline][ERROR] Mapping stap faalde. Probeer Salesforce export te canonicalizen via fallback mapping.")
+        print("[pipeline][ERROR] Mapping stap faalde, fallback mapping actief.")
         print(f"[pipeline][ERROR] Exception: {repr(e)}")
 
-    if not mapping_applied:
-        df = df.rename(columns={k: v for k, v in SF_EXPORT_TO_CANONICAL.items() if k in df.columns})
-        required = (
-            COL_ACCOUNT,
-            COL_OPPORTUNITY,
-            COL_STAGE,
-            COL_FORECAST_CATEGORY,
-            COL_AMOUNT,
-            COL_CLOSE_DATE,
-            COL_CREATED_DATE,
-            COL_AE,
-            COL_NEXT_STEPS,
-        )
-        missing = [c for c in required if c not in df.columns]
-        if missing:
-            print(f"[pipeline][WAARSCHUWING] Niet alle canonical kolommen aanwezig na fallback canonicalize: {missing}")
+    # Run analysis
+    active_df, bookings_df, omitted_df = analyzer.run(
+        df,
+        enable_llm=not args.no_llm,
+    )
 
-    active_df, bookings_df, omitted_df = run_analysis(ctx, df, enable_llm=not args.no_llm)
-
-    management_data = build_management_snapshot(
+    # Build management snapshot
+    management_data = snapshot_builder.build(
         ctx,
         active_df,
         bookings_df,
@@ -63,8 +48,15 @@ def run_pipeline(ctx, args, mapping_path: str) -> None:
         scope=args.output_scope,
     )
 
-    report_text = build_ae_reports(ctx, active_df, bookings_df, omitted_df)
+    # Build AE report
+    report_text = report_builder.build(
+        ctx,
+        active_df,
+        bookings_df,
+        omitted_df,
+    )
     print("[pipeline] AE-rapport klaar, start schrijven naar files...")
 
-    write_reports(report_text, ctx.output_dir)
-    write_management_data(management_data, ctx.output_dir)
+    # Write outputs
+    writer.write_reports(report_text, ctx.output_dir)
+    writer.write_management_data(management_data, ctx.output_dir)

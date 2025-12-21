@@ -8,6 +8,7 @@ from python.application.ports import (
     ManagementSnapshotPort,
     ReportWriterPort,
     NextStepHealthScorerPort,
+    AeReportBuilderPort,
 )
 
 from python.pipeline.io import get_latest_csv, load_csv, write_reports, write_management_data
@@ -36,14 +37,15 @@ class JsonMappingAdapter(MappingPort):
 
 
 class PandasPipelineAnalysisAdapter(PipelineAnalysisPort):
+    def __init__(self, ctx: Any):
+        self.ctx = ctx
+
     def run(
         self,
         df: pd.DataFrame,
         enable_llm: bool,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        # ctx wordt nu nog niet gebruikt in de port
-        # dat is ok voor deze stap
-        return run_analysis(None, df, enable_llm=enable_llm)
+        return run_analysis(self.ctx, df, enable_llm=enable_llm)
 
 
 class DefaultManagementSnapshotAdapter(ManagementSnapshotPort):
@@ -81,3 +83,14 @@ class OllamaNextStepHealthScorerAdapter(NextStepHealthScorerPort):
             deals,
             llm_config=self.llm_config,
         )
+
+
+class DefaultAeReportBuilderAdapter(AeReportBuilderPort):
+    def build(
+        self,
+        ctx: Any,
+        active_df: pd.DataFrame,
+        bookings_df: pd.DataFrame,
+        omitted_df: pd.DataFrame,
+    ) -> str:
+        return build_ae_reports(ctx, active_df, bookings_df, omitted_df)

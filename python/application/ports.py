@@ -52,3 +52,15 @@ class NextStepHealthScorerPort(Protocol):
         self,
         deals: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]: ...
+
+
+class AeReportBuilderPort(Protocol):
+    """Builds the human-readable AE pipeline summary report."""
+
+    def build(
+        self,
+        ctx: Any,
+        active_df: pd.DataFrame,
+        bookings_df: pd.DataFrame,
+        omitted_df: pd.DataFrame,
+    ) -> str: ...
