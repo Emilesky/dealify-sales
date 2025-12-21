@@ -1,5 +1,7 @@
-from typing import List, Dict, Any, Tuple
+
 from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple
+
 import pandas as pd
 
 from python.application.ports import (
