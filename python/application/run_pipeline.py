@@ -30,7 +30,7 @@ def run_pipeline(ctx, args, mapping_path: str) -> None:
         df = mapper.apply_mapping(df, mapping_path)
         print("[pipeline] Mapping toegepast. Verwacht canonical kolommen.")
     except Exception as e:
-        print("[pipeline][ERROR] Mapping stap faalde, fallback mapping actief.")
+        print("[pipeline][ERROR] Mapping stap faalde. Canonical kolommen mogelijk onvolledig.")
         print(f"[pipeline][ERROR] Exception: {repr(e)}")
 
     # Run analysis
