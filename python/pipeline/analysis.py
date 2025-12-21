@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, cast
 
 import pandas as pd
 
@@ -87,7 +87,12 @@ def classify_stage(stage: Any) -> str:
     return "other"
 
 
-def run_analysis(ctx: Any, df: pd.DataFrame, enable_llm: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def run_analysis(
+    ctx: Any,
+    df: pd.DataFrame,
+    enable_llm: bool = True,
+    llm_config: Any | None = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Bereid de data voor:
     - Amount opschonen
@@ -150,7 +155,15 @@ def run_analysis(ctx: Any, df: pd.DataFrame, enable_llm: bool = True) -> Tuple[p
         return active_df, bookings_df, omitted_df
 
     print("[pipeline] Start LLM Next Step health verrijking op actieve pipeline...")
-    llm_cfg = ctx.llm_config
+
+    llm_cfg = llm_config
+    if llm_cfg is None:
+        llm_cfg = getattr(ctx, "llm_config", None)
+
+    if llm_cfg is None:
+        print("[pipeline][WAARSCHUWING] Geen llm_config beschikbaar; ga verder zonder Next Step health.")
+        return active_df, bookings_df, omitted_df
+
     scoring_model = getattr(llm_cfg, "model", None)
     print(f"[pipeline] Next step scoring model (config): {scoring_model}")
 
