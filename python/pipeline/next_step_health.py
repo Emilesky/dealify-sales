@@ -1,9 +1,8 @@
 import json
-import os
-import shutil
 import subprocess
 from typing import Dict, List, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from python.app.config import LLMConfig
 
 """
@@ -17,21 +16,13 @@ Tip: run eerst in je terminal:
 of een andere variant die je hier invult.
 """
 
-# Project root = .../SalesforceSelenium (3 levels up from this file)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
+# Default key name for Next Steps in deal dicts.
+# In the pipeline we canonicalize to `next_steps`, but some raw exports still use `Next Steps`.
+NEXT_STEP_FIELD = "next_steps"
 
-# Default kolomnaam voor Next Steps in je CSV
-NEXT_STEP_FIELD = "Next Steps"
-
-# Standaard te gebruiken Ollama-model (lichtere variant voor betere snelheid)
-DEFAULT_MODEL = "gemma3:4b"
-
-# Pad naar de prompt-template (relatief t.o.v. project-root)
-DEFAULT_PROMPT_PATH = os.path.join(
-    MODELS_DIR,
-    "prompt_next_step_health.txt",
-)
+# Default prompt template path (kept for backward compatibility)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # .../DealifyEngine
+DEFAULT_PROMPT_PATH = str(PROJECT_ROOT / "models" / "prompt_next_step_health.txt")
 
 
 def load_prompt_template(path: str = DEFAULT_PROMPT_PATH) -> str:
@@ -193,7 +184,7 @@ def evaluate_next_step(
 def evaluate_next_steps_batch(
     deals: List[Dict[str, Any]],
     next_step_field: str = NEXT_STEP_FIELD,
-    llm_config: LLMConfig = None,
+    llm_config: Optional[LLMConfig] = None,
     template: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Batch-evaluatie: voegt per deal een 'next_step_health' dict toe met batching + parallelisatie.
@@ -203,8 +194,6 @@ def evaluate_next_steps_batch(
     """
     if llm_config is None:
         raise ValueError("llm_config is verplicht (pipeline moet config injecteren)")
-
-    model = llm_config.model
 
     if template is None:
         template = load_prompt_template()
@@ -235,7 +224,13 @@ def evaluate_next_steps_batch(
         items = []
         for idx in indices:
             deal = deals[idx]
-            text = deal.get(next_step_field, "") or ""
+            text = (
+                deal.get(next_step_field)
+                or deal.get("next_steps")
+                or deal.get("Next Steps")
+                or deal.get("Next Step")
+                or ""
+            )
             try:
                 text_str = str(text)
             except Exception:
@@ -332,12 +327,11 @@ def evaluate_next_steps_batch(
     processed = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_batch_idx = {
-            executor.submit(_process_batch, batch_indices): batch_indices
-            for batch_indices in batches
+            executor.submit(_process_batch, b): b
+            for b in batches
         }
 
         for future in as_completed(future_to_batch_idx):
-            batch_indices = future_to_batch_idx[future]
             batch_result = future.result()
             for idx, d in batch_result:
                 enriched[idx] = d
