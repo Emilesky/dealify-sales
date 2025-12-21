@@ -94,3 +94,20 @@ class DefaultAeReportBuilderAdapter(AeReportBuilderPort):
         omitted_df: pd.DataFrame,
     ) -> str:
         return build_ae_reports(ctx, active_df, bookings_df, omitted_df)
+
+
+def create_default_pipeline_adapters(ctx: Any):
+    """Create the default concrete adapters implementing the application ports.
+
+    This is a small composition helper so wiring can move out of the use case later
+    without changing the underlying adapters.
+    """
+
+    return {
+        "source": FilePipelineSourceAdapter(ctx.data_dir),
+        "mapper": JsonMappingAdapter(),
+        "analyzer": PandasPipelineAnalysisAdapter(ctx),
+        "snapshot_builder": DefaultManagementSnapshotAdapter(),
+        "report_builder": DefaultAeReportBuilderAdapter(),
+        "writer": FileReportWriterAdapter(),
+    }
