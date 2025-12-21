@@ -1,4 +1,5 @@
 from typing import List, Dict, Any, Tuple
+from dataclasses import dataclass
 import pandas as pd
 
 from python.application.ports import (
@@ -95,19 +96,27 @@ class DefaultAeReportBuilderAdapter(AeReportBuilderPort):
     ) -> str:
         return build_ae_reports(ctx, active_df, bookings_df, omitted_df)
 
+@dataclass
+class PipelineAdapters:
+    source: PipelineSourcePort
+    mapper: MappingPort
+    analyzer: PipelineAnalysisPort
+    snapshot_builder: ManagementSnapshotPort
+    report_builder: AeReportBuilderPort
+    writer: ReportWriterPort
 
-def create_default_pipeline_adapters(ctx: Any):
+def create_default_pipeline_adapters(ctx: Any) -> PipelineAdapters:
     """Create the default concrete adapters implementing the application ports.
 
     This is a small composition helper so wiring can move out of the use case later
     without changing the underlying adapters.
     """
 
-    return {
-        "source": FilePipelineSourceAdapter(ctx.data_dir),
-        "mapper": JsonMappingAdapter(),
-        "analyzer": PandasPipelineAnalysisAdapter(ctx),
-        "snapshot_builder": DefaultManagementSnapshotAdapter(),
-        "report_builder": DefaultAeReportBuilderAdapter(),
-        "writer": FileReportWriterAdapter(),
-    }
+    return PipelineAdapters(
+        source=FilePipelineSourceAdapter(ctx.data_dir),
+        mapper=JsonMappingAdapter(),
+        analyzer=PandasPipelineAnalysisAdapter(ctx),
+        snapshot_builder=DefaultManagementSnapshotAdapter(),
+        report_builder=DefaultAeReportBuilderAdapter(),
+        writer=FileReportWriterAdapter(),
+    )
