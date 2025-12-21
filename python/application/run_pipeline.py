@@ -3,6 +3,7 @@ from python.application.ports import (
     AeReportBuilderPort,
     ManagementSnapshotPort,
     MappingPort,
+    NextStepHealthScorerPort,
     PipelineAnalysisPort,
     PipelineSourcePort,
     ReportWriterPort,
@@ -20,6 +21,7 @@ class PipelineRunUseCase:
         snapshot_builder: ManagementSnapshotPort,
         report_builder: AeReportBuilderPort,
         writer: ReportWriterPort,
+        next_step_scorer: NextStepHealthScorerPort | None = None,
     ) -> None:
         self._source = source
         self._mapper = mapper
@@ -27,6 +29,7 @@ class PipelineRunUseCase:
         self._snapshot_builder = snapshot_builder
         self._report_builder = report_builder
         self._writer = writer
+        self._next_step_scorer = next_step_scorer
 
     def run(self, ctx, args, mapping_path: str) -> None:
         # Load data
@@ -81,5 +84,6 @@ def run_pipeline(ctx, args, mapping_path: str) -> None:
         snapshot_builder=adapters.snapshot_builder,
         report_builder=adapters.report_builder,
         writer=adapters.writer,
+        next_step_scorer=adapters.next_step_scorer,
     )
     use_case.run(ctx, args, mapping_path=mapping_path)
