@@ -1,4 +1,11 @@
-from python.application.adapters import create_default_pipeline_adapters
+from python.application.adapters import (
+    FilePipelineSourceAdapter,
+    JsonMappingAdapter,
+    PandasPipelineAnalysisAdapter,
+    DefaultManagementSnapshotAdapter,
+    FileReportWriterAdapter,
+    DefaultAeReportBuilderAdapter,
+)
 
 
 class PipelineRunUseCase:
@@ -6,12 +13,12 @@ class PipelineRunUseCase:
 
     def __init__(
         self,
-        source,
-        mapper,
-        analyzer,
-        snapshot_builder,
-        report_builder,
-        writer,
+        source: FilePipelineSourceAdapter,
+        mapper: JsonMappingAdapter,
+        analyzer: PandasPipelineAnalysisAdapter,
+        snapshot_builder: DefaultManagementSnapshotAdapter,
+        report_builder: DefaultAeReportBuilderAdapter,
+        writer: FileReportWriterAdapter,
     ) -> None:
         self._source = source
         self._mapper = mapper
@@ -67,13 +74,12 @@ def run_pipeline(ctx, args, mapping_path: str) -> None:
     Application-level pipeline execution (composition/wiring).
     Creates the use case with concrete adapters and executes it.
     """
-    adapters = create_default_pipeline_adapters(ctx)
     use_case = PipelineRunUseCase(
-        source=adapters["source"],
-        mapper=adapters["mapper"],
-        analyzer=adapters["analyzer"],
-        snapshot_builder=adapters["snapshot_builder"],
-        report_builder=adapters["report_builder"],
-        writer=adapters["writer"],
+        source=FilePipelineSourceAdapter(ctx.data_dir),
+        mapper=JsonMappingAdapter(),
+        analyzer=PandasPipelineAnalysisAdapter(ctx),
+        snapshot_builder=DefaultManagementSnapshotAdapter(),
+        report_builder=DefaultAeReportBuilderAdapter(),
+        writer=FileReportWriterAdapter(),
     )
     use_case.run(ctx, args, mapping_path=mapping_path)
