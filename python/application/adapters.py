@@ -96,6 +96,7 @@ class DefaultAeReportBuilderAdapter(AeReportBuilderPort):
     ) -> str:
         return build_ae_reports(ctx, active_df, bookings_df, omitted_df)
 
+
 @dataclass
 class PipelineAdapters:
     source: PipelineSourcePort
@@ -104,6 +105,7 @@ class PipelineAdapters:
     snapshot_builder: ManagementSnapshotPort
     report_builder: AeReportBuilderPort
     writer: ReportWriterPort
+
 
 def create_default_pipeline_adapters(ctx: Any) -> PipelineAdapters:
     """Create the default concrete adapters implementing the application ports.
