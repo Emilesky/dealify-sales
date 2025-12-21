@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
@@ -108,6 +107,7 @@ class PipelineAdapters:
     snapshot_builder: ManagementSnapshotPort
     report_builder: AeReportBuilderPort
     writer: ReportWriterPort
+    next_step_scorer: NextStepHealthScorerPort | None = None
 
 
 def create_default_pipeline_adapters(ctx: Any) -> PipelineAdapters:
@@ -124,4 +124,7 @@ def create_default_pipeline_adapters(ctx: Any) -> PipelineAdapters:
         snapshot_builder=DefaultManagementSnapshotAdapter(),
         report_builder=DefaultAeReportBuilderAdapter(),
         writer=FileReportWriterAdapter(),
+        next_step_scorer=OllamaNextStepHealthScorerAdapter(getattr(ctx, "llm_config", None))
+        if getattr(ctx, "llm_config", None) is not None
+        else None,
     )
