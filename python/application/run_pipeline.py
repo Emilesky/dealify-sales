@@ -1,10 +1,11 @@
-from python.application.adapters import (
-    FilePipelineSourceAdapter,
-    JsonMappingAdapter,
-    PandasPipelineAnalysisAdapter,
-    DefaultManagementSnapshotAdapter,
-    FileReportWriterAdapter,
-    DefaultAeReportBuilderAdapter,
+from python.application.adapters import create_default_pipeline_adapters
+from python.application.ports import (
+    AeReportBuilderPort,
+    ManagementSnapshotPort,
+    MappingPort,
+    PipelineAnalysisPort,
+    PipelineSourcePort,
+    ReportWriterPort,
 )
 
 
@@ -13,12 +14,12 @@ class PipelineRunUseCase:
 
     def __init__(
         self,
-        source: FilePipelineSourceAdapter,
-        mapper: JsonMappingAdapter,
-        analyzer: PandasPipelineAnalysisAdapter,
-        snapshot_builder: DefaultManagementSnapshotAdapter,
-        report_builder: DefaultAeReportBuilderAdapter,
-        writer: FileReportWriterAdapter,
+        source: PipelineSourcePort,
+        mapper: MappingPort,
+        analyzer: PipelineAnalysisPort,
+        snapshot_builder: ManagementSnapshotPort,
+        report_builder: AeReportBuilderPort,
+        writer: ReportWriterPort,
     ) -> None:
         self._source = source
         self._mapper = mapper
@@ -70,16 +71,15 @@ class PipelineRunUseCase:
 
 
 def run_pipeline(ctx, args, mapping_path: str) -> None:
-    """
-    Application-level pipeline execution (composition/wiring).
-    Creates the use case with concrete adapters and executes it.
-    """
+    """Application-level pipeline execution (composition/wiring)."""
+
+    adapters = create_default_pipeline_adapters(ctx)
     use_case = PipelineRunUseCase(
-        source=FilePipelineSourceAdapter(ctx.data_dir),
-        mapper=JsonMappingAdapter(),
-        analyzer=PandasPipelineAnalysisAdapter(ctx),
-        snapshot_builder=DefaultManagementSnapshotAdapter(),
-        report_builder=DefaultAeReportBuilderAdapter(),
-        writer=FileReportWriterAdapter(),
+        source=adapters.source,
+        mapper=adapters.mapper,
+        analyzer=adapters.analyzer,
+        snapshot_builder=adapters.snapshot_builder,
+        report_builder=adapters.report_builder,
+        writer=adapters.writer,
     )
     use_case.run(ctx, args, mapping_path=mapping_path)
