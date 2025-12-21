@@ -1,3 +1,21 @@
+"""\
+CLI adapter for running the Dealify pipeline analysis.
+
+Responsibilities:
+- Parse CLI arguments
+- Load runtime configuration
+- Invoke the pipeline execution flow (analysis + builders)
+- Persist outputs (JSON/TXT)
+
+Non-responsibilities:
+- Business rules, domain logic, and aggregations should live in dedicated modules
+  (analysis.py, management_builders.py, reports.py, etc.).
+
+Note:
+This module should remain thin so it can later be replaced by an API/worker adapter
+without changing the core behavior.
+"""
+
 from __future__ import annotations
 
 import os
@@ -136,6 +154,7 @@ def main() -> None:
     )
     print("[pipeline] Run tip: python3 -m python.pipeline.pipeline_analyse")
 
+    # CLI inputs (adapter layer)
     args = parse_args()
 
     print(f"[pipeline] Output scope (CLI): {args.output_scope}")
