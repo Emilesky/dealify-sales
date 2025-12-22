@@ -34,8 +34,6 @@ from python.application.run_pipeline import run_pipeline
 
 DEFAULT_PIPELINE_MAPPING = "mappings/salesforce_pipeline.json"
 
-CALENDAR_CFG: Dict[str, Any] = {}
-RULES_CFG: Dict[str, Any] = {}
 
 
 @dataclass
@@ -50,17 +48,17 @@ class AnalysisContext:
     llm_config: Any
 
 
-def _get_calendar_cfg() -> Dict[str, Any]:
+def _get_calendar_cfg(calendar_cfg: Dict[str, Any] | None) -> Dict[str, Any]:
     # Defaults are safe fallbacks
-    cal = CALENDAR_CFG or {}
+    cal = calendar_cfg or {}
     return {
         "fiscal_year_start_month": int(cal.get("fiscal_year_start_month", 2)),
         "fiscal_year_start_day": int(cal.get("fiscal_year_start_day", 1)),
     }
 
 
-def _get_rules_cfg() -> Dict[str, Any]:
-    rules = RULES_CFG or {}
+def _get_rules_cfg(rules_cfg: Dict[str, Any] | None) -> Dict[str, Any]:
+    rules = rules_cfg or {}
     return {
         "next_step_low_score_threshold": float(rules.get("next_step_low_score_threshold", 5.0)),
         "horizon_days_short": int(rules.get("horizon_days_short", 14)),
@@ -115,16 +113,14 @@ def main() -> None:
 
     cfg = load_config()
 
-    # Keep global config for helper functions (compatible with current setup)
-    global CALENDAR_CFG, RULES_CFG
-    CALENDAR_CFG = cfg.get("calendar", {}) or {}
-    RULES_CFG = cfg.get("rules", {}) or {}
+    calendar_cfg = cfg.get("calendar", {}) or {}
+    rules_cfg = cfg.get("rules", {}) or {}
 
     data_dir = cfg["paths"]["data_dir_abs"]
     output_dir = cfg["paths"]["outputs_dir_abs"]
 
-    cal = _get_calendar_cfg()
-    rules = _get_rules_cfg()
+    cal = _get_calendar_cfg(calendar_cfg)
+    rules = _get_rules_cfg(rules_cfg)
 
     print(f"[pipeline] Data dir (config): {data_dir}")
     print(f"[pipeline] Output dir (config): {output_dir}")
@@ -166,8 +162,8 @@ def main() -> None:
         today=today_value,
         data_dir=data_dir or "",
         output_dir=output_dir or "",
-        calendar=_get_calendar_cfg(),
-        rules=_get_rules_cfg(),
+        calendar=cal,
+        rules=rules,
         team_target_current_quarter=float(team_target_value),
         bookings_to_date_current_quarter=float(bookings_to_date_value),
         llm_config=llm_cfg,

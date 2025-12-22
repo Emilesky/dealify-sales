@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional, Tuple, cast
+from typing import Any, Optional, Tuple
 
 import pandas as pd
 
