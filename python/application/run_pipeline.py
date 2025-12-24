@@ -73,7 +73,7 @@ class PipelineRunUseCase:
         self._writer.write_management_data(management_data, ctx.output_dir)
 
 
-def run_pipeline(ctx, args, mapping_path: str) -> None:
+def run_pipeline_app(ctx, args, mapping_path: str) -> None:
     """Application-level pipeline execution (composition/wiring)."""
 
     adapters = create_default_pipeline_adapters(ctx)
@@ -87,3 +87,9 @@ def run_pipeline(ctx, args, mapping_path: str) -> None:
         next_step_scorer=adapters.next_step_scorer,
     )
     use_case.run(ctx, args, mapping_path=mapping_path)
+
+
+def run_pipeline(ctx, args, mapping_path: str) -> None:
+    """Backward-compatible wrapper. Prefer `run_pipeline_app`."""
+
+    run_pipeline_app(ctx, args, mapping_path=mapping_path)

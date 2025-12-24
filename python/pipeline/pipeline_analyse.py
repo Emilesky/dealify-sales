@@ -29,7 +29,7 @@ from typing import Any, Dict
 
 
 from python.app.config import load_config, get_llm_config
-from python.application.run_pipeline import run_pipeline
+from python.application.run_pipeline import run_pipeline_app
 
 
 DEFAULT_PIPELINE_MAPPING = "mappings/salesforce_pipeline.json"
@@ -173,7 +173,7 @@ def main() -> None:
     mapping_path = args.mapping or str(project_root / DEFAULT_PIPELINE_MAPPING)
     print(f"[pipeline] Mapping gebruiken: {mapping_path}")
 
-    run_pipeline(ctx, args, mapping_path=mapping_path)
+    run_pipeline_app(ctx, args, mapping_path=mapping_path)
 
     print("Pipeline analyse voltooid. Output geschreven naar:")
     out_dir = ctx.output_dir or "outputs"
