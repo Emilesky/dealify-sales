@@ -47,8 +47,7 @@ class PandasPipelineAnalysisAdapter(PipelineAnalysisPort):
         df: pd.DataFrame,
         enable_llm: bool,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        llm_cfg = getattr(self.ctx, "llm_config", None)
-        return run_analysis(self.ctx, df, enable_llm=enable_llm, llm_config=llm_cfg)
+        return run_analysis(self.ctx, df, enable_llm=enable_llm)
 
 
 class DefaultManagementSnapshotAdapter(ManagementSnapshotPort):
