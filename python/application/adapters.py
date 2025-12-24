@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
@@ -77,7 +79,7 @@ class FileReportWriterAdapter(ReportWriterPort):
 
 
 class OllamaNextStepHealthScorerAdapter(NextStepHealthScorerPort):
-    def __init__(self, llm_config):
+    def __init__(self, llm_config: Any):
         self.llm_config = llm_config
 
     def enrich(self, deals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
