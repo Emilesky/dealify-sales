@@ -1,6 +1,9 @@
-from typing import Any, Protocol
+from __future__ import annotations
 
-import pandas as pd
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 class PipelineSourcePort(Protocol):
@@ -8,13 +11,13 @@ class PipelineSourcePort(Protocol):
 
     def get_latest_pipeline_path(self) -> str: ...
 
-    def load_pipeline(self, path: str) -> pd.DataFrame: ...
+    def load_pipeline(self, path: str) -> "pd.DataFrame": ...
 
 
 class MappingPort(Protocol):
     """Past een CRM-specifieke mapping toe naar canonical kolommen."""
 
-    def apply_mapping(self, df: pd.DataFrame, mapping_path: str) -> pd.DataFrame: ...
+    def apply_mapping(self, df: "pd.DataFrame", mapping_path: str) -> "pd.DataFrame": ...
 
 
 class PipelineAnalysisPort(Protocol):
@@ -22,9 +25,9 @@ class PipelineAnalysisPort(Protocol):
 
     def run(
         self,
-        df: pd.DataFrame,
+        df: "pd.DataFrame",
         enable_llm: bool,
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: ...
+    ) -> tuple["pd.DataFrame", "pd.DataFrame", "pd.DataFrame"]: ...
 
 
 class ManagementSnapshotPort(Protocol):
@@ -33,9 +36,9 @@ class ManagementSnapshotPort(Protocol):
     def build(
         self,
         ctx: Any,
-        active_df: pd.DataFrame,
-        bookings_df: pd.DataFrame,
-        omitted_df: pd.DataFrame,
+        active_df: "pd.DataFrame",
+        bookings_df: "pd.DataFrame",
+        omitted_df: "pd.DataFrame",
         scope: str,
     ) -> dict[str, Any]: ...
 
@@ -60,7 +63,7 @@ class AeReportBuilderPort(Protocol):
     def build(
         self,
         ctx: Any,
-        active_df: pd.DataFrame,
-        bookings_df: pd.DataFrame,
-        omitted_df: pd.DataFrame,
+        active_df: "pd.DataFrame",
+        bookings_df: "pd.DataFrame",
+        omitted_df: "pd.DataFrame",
     ) -> str: ...
