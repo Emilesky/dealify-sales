@@ -154,8 +154,12 @@ class DefaultAeReportBuilderAdapter(AeReportBuilderPort):
 class FileReportWriterAdapter(ReportWriterPort):
     """Write management JSON and AE report TXT files to the output directory."""
 
-    def write_reports(self, output_dir: str, reports: dict[str, str]) -> None:
-        write_reports(output_dir, reports)
+    def write_reports(self, report_text: str, output_dir: str) -> None:
+        """Write the human-readable pipeline report to disk."""
 
-    def write_management_data(self, output_dir: str, management_data: dict) -> None:
-        write_management_data(output_dir, management_data)
+        write_reports(report_text, output_dir)
+
+    def write_management_data(self, management_data: dict, output_dir: str) -> None:
+        """Write the management snapshot JSON to disk."""
+
+        write_management_data(management_data, output_dir)
