@@ -66,17 +66,54 @@ class PipelineRunUseCase:
         df = self._mapper.apply_mapping(df, mapping_path=request.mapping_path)
 
         # 3) Analyze / transform
+        # Analysis should be deterministic and free of external side effects.
+        # LLM enrichment is orchestrated explicitly in the use case (step 4).
         active_df, bookings_df, omitted_df = self._analyzer.run(
             df,
-            enable_llm=request.enable_llm,
+            enable_llm=False,
         )
 
-        # 4) Optional: LLM scoring is handled inside the analyzer in the current codebase.
-        # We keep the port here because later we may split scoring from analysis.
-        # For now, we simply ensure the dependency is injectable.
-        if request.enable_llm and self._next_step_scorer is None:
-            # No hard failure: analysis may already have added next_step_health.
-            pass
+        # 4) Optional: LLM enrichment (explicit orchestration)
+        if request.enable_llm:
+            if self._next_step_scorer is None:
+                raise ValueError(
+                    "LLM enrichment requested (enable_llm=True) but no NextStepHealthScorerPort was provided. "
+                    "Ensure ctx.llm_config is set so the composition root can inject a scorer."
+                )
+
+            # Convert to records, enrich, then write enrichment fields back onto the dataframe.
+            # Note: we avoid importing pandas here; we only rely on the DataFrame protocol used at runtime.
+            records = active_df.to_dict(orient="records")
+            if not records:
+                # Nothing to enrich
+                enriched = []
+            else:
+                enriched = self._next_step_scorer.enrich(records)
+
+            if len(enriched) != len(records):
+                raise ValueError(
+                    f"LLM enrichment returned {len(enriched)} records for {len(records)} input records."
+                )
+
+            if not enriched:
+                enrichment_columns = set()
+            else:
+                original_columns = set(getattr(active_df, "columns", []))
+                enrichment_columns = {
+                    k
+                    for k in enriched[0].keys()
+                    if k not in original_columns
+                    or k
+                    in {
+                        "next_step_health",
+                        "next_step_health_score",
+                        "next_step_health_rationale",
+                        "next_step_health_json",
+                    }
+                }
+
+            for col in sorted(enrichment_columns):
+                active_df[col] = [row.get(col) for row in enriched]
 
         # 5) Build management JSON
         management_data = self._management_builder.build(

@@ -96,7 +96,7 @@ def parse_args() -> argparse.Namespace:
         "--no-llm",
         "--skip-llm",
         action="store_true",
-        help="Sla de LLM Next Step health verrijking over (sneller, geen Ollama/SaaS nodig).",
+        help="Sla LLM Next Step health verrijking over. Let op: analyse draait altijd zonder LLM; verrijking gebeurt expliciet in de use case.",
     )
     parser.add_argument(
         "--output-scope",
@@ -135,6 +135,14 @@ def main() -> None:
     args = parse_args()
 
     print(f"[pipeline] Output scope (CLI): {args.output_scope}")
+
+    if args.no_llm:
+        print("[pipeline] LLM Next Step health verrijking is uitgeschakeld (--no-llm).")
+    else:
+        print(
+            "[pipeline] LLM Next Step health verrijking is ingeschakeld. "
+            "Analyse draait zonder LLM; verrijking gebeurt expliciet in de use case."
+        )
 
     # Determine today_value, optionally overridden via --today
     today_value = date.today()

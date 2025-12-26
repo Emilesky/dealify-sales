@@ -121,8 +121,9 @@ class PandasPipelineAnalysisAdapter(PipelineAnalysisPort):
 
     ctx: object
 
-    def run(self, df: pd.DataFrame, enable_llm: bool, llm_config=None):
-        result = run_analysis(self.ctx, df, enable_llm=enable_llm, llm_config=llm_config)
+    def run(self, df: pd.DataFrame, enable_llm: bool):
+        # Analysis is deterministic and LLM-free. Any LLM enrichment happens explicitly in the use case.
+        result = run_analysis(self.ctx, df)
         if result is None:
             raise ValueError("run_analysis returned None")
         return result
