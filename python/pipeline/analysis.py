@@ -151,7 +151,6 @@ def run_analysis(
     print(f"[pipeline] Actieve pipeline deals (excl. Bookings/Omitted): {len(active_df)}")
 
     if not enable_llm:
-        print("[pipeline] LLM Next Step health verrijking is uitgeschakeld (--no-llm).")
         return active_df, bookings_df, omitted_df
 
     print("[pipeline] Start LLM Next Step health verrijking op actieve pipeline...")
