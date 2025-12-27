@@ -20,8 +20,10 @@ of een andere variant die je hier invult.
 # In the pipeline we canonicalize to `next_steps`, but some raw exports still use `Next Steps`.
 NEXT_STEP_FIELD = "next_steps"
 
-# Default prompt template path (kept for backward compatibility)
-PROJECT_ROOT = Path(__file__).resolve().parents[2]  # .../DealifyEngine
+# Default prompt template path.
+# NOTE: this file now lives under `python/infrastructure/llm/`, so we need one extra `..`
+# to reach the repo root.
+PROJECT_ROOT = Path(__file__).resolve().parents[3]  # .../DealifyEngine
 DEFAULT_PROMPT_PATH = str(PROJECT_ROOT / "models" / "prompt_next_step_health.txt")
 
 

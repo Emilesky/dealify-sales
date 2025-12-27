@@ -19,7 +19,7 @@ from python.domain.pipeline_intel.mapping import load_mapping, map_dataframe
 from python.domain.pipeline_intel.analysis import run_analysis
 from python.domain.pipeline_intel.management import build_management_snapshot
 from python.domain.pipeline_intel.reports import build_ae_reports
-from python.pipeline.next_step_health import evaluate_next_steps_batch
+from python.infrastructure.llm.next_step_health import evaluate_next_steps_batch
 
 __all__ = [
     "PipelineAdapters",
