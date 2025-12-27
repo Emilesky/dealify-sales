@@ -1,4 +1,4 @@
-# Dealify Engine – Architectuur (single source of truth)
+# Dealify Engine - Architectuur (single source of truth)
 
 Complete overzicht van lagen, componenten, functies en wiring, zodat een volgende developer een verdere hexagon-refactor kan doen.
 
@@ -9,12 +9,12 @@ Complete overzicht van lagen, componenten, functies en wiring, zodat een volgend
 
 ## 2. Lagen & hoofdflow (as-is)
 ```
-CLI (python/pipeline/pipeline_analyse.py)
-  -> Application wiring (python/application/run_pipeline.py)
+CLI (python/entrypoints/cli/pipeline_analyse.py)
+  -> Application wiring (python/application/bootstrap_pipeline.py)
   -> Use case (PipelineRunUseCase in python/application/workflows/run_pipeline.py)
   -> Ports (python/application/ports.py)
-  -> Adapters (python/infrastructure/pipeline/adapters.py)
-  -> Domain functies (python/pipeline/*, python/llm/client.py)
+  -> Adapters + composition root (python/infrastructure/pipeline/adapters.py)
+  -> Domain functies (python/pipeline/*) + LLM utility (python/llm/client.py)
   -> Outputs (outputs/*.txt, outputs/*.json)
 ```
 
@@ -24,28 +24,26 @@ CLI (python/pipeline/pipeline_analyse.py)
 - `python/entrypoints/cli/pipeline_analyse.py`
   - Canonical CLI entrypoint.
   - Parses CLI flags, builds `AnalysisContext`, resolves mapping path and invokes the application layer.
-- `python/pipeline/pipeline_analyse.py`
-  - Compatibility wrapper that delegates to the canonical CLI entrypoint.
-  - Kept temporarily to avoid breaking existing run commands.
 
 ### Application (use case + wiring)
-- `python/application/run_pipeline.py`
-  - `run_pipeline_app(ctx, args, mapping_path)` → `create_default_pipeline_adapters(ctx)` → init `PipelineRunUseCase` → bouw `PipelineRunRequest` → `use_case.execute(ctx, request)`.
-  - `run_pipeline(...)` legacy alias.
+- `python/application/bootstrap_pipeline.py`
+  - Pure wiring/composition helper.
+  - Calls `create_default_pipeline_adapters(ctx)` and instantiates `PipelineRunUseCase`.
+  - No business logic.
 - `python/application/workflows/run_pipeline.py`
   - `PipelineRunRequest` (mapping_path, output_scope, enable_llm).
-  - `PipelineRunUseCase.execute(ctx, request)`:
+  - **All orchestration happens inside `PipelineRunUseCase.execute()`**:
     1) `source.get_latest_pipeline_path()` → `source.load_pipeline()`
     2) `mapper.apply_mapping(df, mapping_path)`
-    3) `analyzer.run(df, enable_llm)`
-    4) optional `next_step_scorer` kept injectable (scoring zit nu in analyzer)
+    3) `analyzer.run(df, enable_llm=False)` (analysis is deterministisch en LLM-vrij)
+    4) indien `request.enable_llm`: verrijking via `next_step_scorer.enrich(...)` in de use case (expliciet)
     5) `management_builder.build(ctx, active_df, bookings_df, omitted_df, scope)`
     6) `report_builder.build(...)` → `writer.write_reports(...)`; `writer.write_management_data(...)`
 
 ### Ports (contracts) – `python/application/ports.py`
 - `PipelineSourcePort`: get_latest_pipeline_path(), load_pipeline(path)
 - `MappingPort`: apply_mapping(df, mapping_path)
-- `PipelineAnalysisPort`: run(df, enable_llm) -> (active_df, bookings_df, omitted_df)
+- `PipelineAnalysisPort`: run(df, enable_llm) -> (active_df, bookings_df, omitted_df) (enable_llm wordt in de huidige adapter genegeerd; analysis is LLM-vrij)
 - `ManagementSnapshotPort`: build(ctx, active_df, bookings_df, omitted_df, scope)
 - `ReportWriterPort`: write_reports(...), write_management_data(...)
 - `NextStepHealthScorerPort`: enrich(deals)
@@ -60,20 +58,20 @@ Note: The composition root intentionally lives in the infrastructure layer. The 
 - Adapters (concrete):
   - `FilePipelineSourceAdapter(data_dir, name_contains="pipeline")`: get_latest_pipeline_path(), load_pipeline(), load_latest_pipeline_dataframe().
   - `JsonMappingAdapter`: apply_mapping(df_raw, mapping_path).
-  - `PandasPipelineAnalysisAdapter(ctx)`: run(df, enable_llm, llm_config=None) → `pipeline.analysis.run_analysis`.
+  - `PandasPipelineAnalysisAdapter(ctx)`: run(df, enable_llm) → `pipeline.analysis.run_analysis(ctx, df)` (analysis is LLM-vrij; enable_llm wordt genegeerd).
   - `DefaultManagementSnapshotAdapter`: build(...) → `pipeline.management.build_management_snapshot`.
   - `DefaultAeReportBuilderAdapter`: build(...) → `pipeline.reports.build_ae_reports`.
-  - `FileReportWriterAdapter`: write_reports(output_dir, reports), write_management_data(output_dir, management_data) → calls `pipeline.io.write_reports` / `write_management_data` (as-is signature uses `(output_dir, reports)`, zie io voor huidige signatuur).
+  - `FileReportWriterAdapter`: write_reports(report_text, output_dir) en write_management_data(data, output_dir) → calls `pipeline.io.write_reports` / `write_management_data` (signatures aligned).
   - `OllamaNextStepHealthScorerAdapter(llm_config)`: enrich(deals) → `evaluate_next_steps_batch`.
 - `python/application/adapters.py`: bewust leeg (geen bridge, geen re-export).
 
 ### Domain / pipeline functies
 - `python/pipeline/constants.py`: canonical kolommen (account_name, opportunity_name, stage, forecast_category, amount, close_date, created_date, ae_name, next_steps), afgeleide kolommen (amount_clean, close_date_parsed, stage_class), SF fallback map.
 - `python/pipeline/mapping.py`: `load_mapping(mapping_path)` (validate JSON, required), `map_dataframe(df_raw, mapping)` met `_pick_existing_column`, `MappingError`.
-- `python/pipeline/analysis.py`: helpers `parse_amount`, `classify_stage`, `extract_health_score`; `run_analysis(ctx, df, enable_llm=True, llm_config=None)` → cleanse amounts, parse close dates, stage class, split active/bookings/omitted op forecast_category, optionele LLM batch via `evaluate_next_steps_batch`, logging + sample stats.
+- `python/pipeline/analysis.py`: helpers `parse_amount`, `classify_stage`; `run_analysis(ctx, df)` → cleanse amounts, parse close dates, stage class, split active/bookings/omitted op forecast_category. (Geen LLM in analysis.)
 - `python/pipeline/management.py`: fiscal helpers, `build_management_data(ctx, active_df, bookings_df, omitted_df)`, `build_management_snapshot(..., scope)` (scopes: management | extended | full).
 - `python/pipeline/management_builders.py`: `_safe_sum_amount`, `_safe_iso`, `build_team_overview`, `build_deals_closing_next_14_days`, `build_quarter_concentration`, `build_discovery_hygiene_alerts`, `build_ae_scorecards`.
-- `python/pipeline/reports.py`: `build_ae_reports(ctx, active_df, bookings_df, omitted_df)` → tekstuele AE pipeline summary met hygiene/LLM stats.
+- `python/pipeline/reports.py`: `build_ae_reports(ctx, active_df, bookings_df, omitted_df)` → tekstuele AE pipeline summary met hygiene stats. (LLM is optioneel; velden kunnen ontbreken bij --no-llm.)
 - `python/pipeline/io.py`: `get_latest_csv`, `load_csv`, `write_reports(text, output_dir)`, `write_management_data(data, output_dir)`, `write_management_summary(text, output_dir)`, `sanitize_for_json`, helpers for timestamped files.
 - `python/pipeline/next_step_health.py`: `load_prompt_template`, `build_prompt`, `call_ollama`, `parse_json_response`, `parse_json_array_response`, `evaluate_next_step`, `evaluate_next_steps_batch` (batch prompt builder, ThreadPoolExecutor, fallbacks).
 
@@ -92,8 +90,8 @@ Note: The composition root intentionally lives in the infrastructure layer. The 
 
 ## 4. Dataflow (huidige run)
 1) CLI → config + context geladen.  
-2) `run_pipeline_app` bouwt adapters + use case.  
-3) Use case: find/load CSV → mapping → analyse (pandas, opt. LLM) → management JSON → AE report → schrijf outputs (latest + timestamped).  
+2) `bootstrap_pipeline` bouwt adapters + use case.  
+3) Use case: find/load CSV → mapping → analyse (pandas, LLM-vrij) → optionele LLM verrijking → management JSON → AE report → schrijf outputs (latest + timestamped).  
 4) Weekly flow (optioneel): `weekly_filter` reduceert management JSON → compact weekly JSON → `weekly_management_scan` maakt prompt + LLM output.  
 
 ### Visuele weergave (Mermaid)
@@ -103,7 +101,7 @@ flowchart TD
         CLI[pipeline_analyse.py]
     end
     subgraph App[Application]
-        RP[run_pipeline_app]
+        BP[bootstrap_pipeline]
         UC[PipelineRunUseCase]
     end
     subgraph Ports
@@ -127,13 +125,13 @@ flowchart TD
     subgraph Domain[Domain funcs\npython/pipeline/*]
         D1[io.get_latest_csv/load_csv]
         D2[mapping.load_mapping/map_dataframe]
-        D3[analysis.run_analysis (+ optional LLM)]
+        D3[analysis.run_analysis (LLM-vrij)]
         D4[next_step_health.evaluate_next_steps_batch]
         D5[management.build_management_snapshot]
         D6[reports.build_ae_reports]
         D7[io.write_reports/write_management_data]
     end
-    CLI --> RP --> UC
+    CLI --> BP --> UC
     UC --> P1 & P2 & P3 & P4 & P5 & P6 & P7
     P1 --> A1 --> D1
     P2 --> A2 --> D2
@@ -156,15 +154,15 @@ flowchart TD
 ## 5. Ports ↔ adapters ↔ domain (nu)
 - `PipelineSourcePort` → `FilePipelineSourceAdapter` → `pipeline.io.get_latest_csv` / `load_csv`.
 - `MappingPort` → `JsonMappingAdapter` → `pipeline.mapping.load_mapping` / `map_dataframe`.
-- `PipelineAnalysisPort` → `PandasPipelineAnalysisAdapter` → `pipeline.analysis.run_analysis` (LLM scoring nog binnen deze functie).
-- `NextStepHealthScorerPort` → `OllamaNextStepHealthScorerAdapter` → `pipeline.next_step_health.evaluate_next_steps_batch` (injecteerbaar, niet gebruikt in use case flow).
+- `PipelineAnalysisPort` → `PandasPipelineAnalysisAdapter` → `pipeline.analysis.run_analysis` (analysis is LLM-vrij; verrijking gebeurt apart).
+- `NextStepHealthScorerPort` → `OllamaNextStepHealthScorerAdapter` → `pipeline.next_step_health.evaluate_next_steps_batch` (injecteerbaar en gebruikt in de use case wanneer enable_llm=True).
 - `ManagementSnapshotPort` → `DefaultManagementSnapshotAdapter` → `pipeline.management.build_management_snapshot`.
 - `AeReportBuilderPort` → `DefaultAeReportBuilderAdapter` → `pipeline.reports.build_ae_reports`.
-- `ReportWriterPort` → `FileReportWriterAdapter` → `pipeline.io.write_reports` / `write_management_data` (let op: adapter signature `(output_dir, reports)` vs. io-signature `(text, output_dir)` as-is).
+- `ReportWriterPort` → `FileReportWriterAdapter` → `pipeline.io.write_reports` / `write_management_data` (signatures aligned with pipeline.io).
 
 ## 6. Refactor richting volledige hexagon (aanbevolen stappen)
 1) **Align writer signatures**: breng `FileReportWriterAdapter` in lijn met `pipeline.io.write_reports(text, output_dir)` of pas io-signatures aan; update use case aanroep (nu `writer.write_reports(report_text, output_dir)` in use case vs. adapter `(output_dir, reports)`).  
-2) **LLM uit analyzer halen**: laat `PipelineAnalysisPort` puur data transformeren; gebruik `NextStepHealthScorerPort` expliciet voor verrijking (of aparte use case stap).  
+2) **LLM uit analyzer halen**: afgerond. `PipelineAnalysisPort` is LLM-vrij; `NextStepHealthScorerPort` wordt expliciet gebruikt voor verrijking in de use case.  
 3) **Domain map**: verplaats pure businessfuncties (analysis, mapping, management, reports, health helpers) naar `python/domain/pipeline/` met zo min mogelijk ctx-lekken; pandas/LLM alleen waar nodig.  
 4) **Infrastructure opsplitsen**: deel adapters op per concern (io_adapter.py, mapping_adapter.py, analysis_adapter.py, llm_adapter.py, reports_adapter.py) zodat wiring duidelijk blijft.  
 5) **Use-case layering**: keep composition in infrastructure or entrypoints; ensure the application layer contains only ports and use cases and has no infrastructure imports.  
@@ -172,10 +170,9 @@ flowchart TD
 7) **Ops/weekly**: houd weekly tools als aparte adapters (consumer van management JSON); evt. nieuwe port voor “ManagementScanPort” als dit first-class flow wordt.  
 
 ## 7. Bekende aandachtspunten (as-is)
-- Writer signature mismatch (adapter vs. `pipeline.io`): bij refactor expliciet kiezen en e2e run checken.
-- Analyzer bevat LLM call; NextStepHealthScorerPort niet gebruikt in flow (wel beschikbaar).
-- pandas in domain-functies; acceptabel nu, maar bij strikte hexagon isoleren via adapters of services.
-- `python/application/adapters.py` is leeg by design; alle concrete adapters staan in `python/infrastructure/pipeline/adapters.py` (enkelvoudige waarheid).
+- Writer signatures zijn aligned (writer adapter en pipeline.io).
+- Analysis is LLM-vrij; LLM verrijking gebeurt expliciet in de use case via NextStepHealthScorerPort.
+- pandas zit nog in domain-functies; acceptabel nu, maar bij strikte hexagon kan dit later verder geisoleerd worden.
 
 All processing happens in-memory.
 
@@ -215,6 +212,9 @@ Completed:
 - Application adapters reduced to an empty facade
 - Circular imports removed
 - Pipeline runs end-to-end with and without LLM
+- LLM is volledig losgekoppeld van python/pipeline/analysis.py
+- LLM verrijking gebeurt expliciet in PipelineRunUseCase (application layer)
+- Legacy CLI (python/pipeline/pipeline_analyse.py) verwijderd; single canonical entrypoint via python/entrypoints/cli/pipeline_analyse.py.
 
 Intentionally empty:
 - `python/application/adapters.py` (kept as facade placeholder)

@@ -1,4 +1,4 @@
-from python.infrastructure.pipeline.adapters import create_default_pipeline_adapters
+from python.infrastructure.pipeline.pipeline_adapters import create_default_pipeline_adapters
 from python.application.workflows.run_pipeline import PipelineRunUseCase, PipelineRunRequest
 
 
