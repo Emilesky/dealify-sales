@@ -14,11 +14,11 @@ from typing import Any, Dict, List
 import pandas as pd
 
 from python.application.ports import AeReportBuilderPort, MappingPort, ManagementSnapshotPort, NextStepHealthScorerPort, PipelineAnalysisPort, PipelineSourcePort, ReportWriterPort
-from python.pipeline.io import get_latest_csv, load_csv, write_management_data, write_reports
-from python.pipeline.mapping import load_mapping, map_dataframe
-from python.pipeline.analysis import run_analysis
-from python.pipeline.management import build_management_snapshot
-from python.pipeline.reports import build_ae_reports
+from python.infrastructure.io.filesystem import get_latest_csv, load_csv, write_management_data, write_reports
+from python.domain.pipeline_intel.mapping import load_mapping, map_dataframe
+from python.domain.pipeline_intel.analysis import run_analysis
+from python.domain.pipeline_intel.management import build_management_snapshot
+from python.domain.pipeline_intel.reports import build_ae_reports
 from python.pipeline.next_step_health import evaluate_next_steps_batch
 
 __all__ = [

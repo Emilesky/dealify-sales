@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from python.pipeline.constants import (
+from python.domain.pipeline_intel.constants import (
     COL_ACCOUNT,
     COL_OPPORTUNITY,
     COL_AE,

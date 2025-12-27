@@ -5,7 +5,7 @@ from typing import Any, Tuple
 
 import pandas as pd
 
-from python.pipeline.constants import (
+from python.domain.pipeline_intel.constants import (
     COL_AMOUNT,
     COL_AMOUNT_CLEAN,
     COL_CLOSE_DATE,
