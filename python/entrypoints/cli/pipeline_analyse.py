@@ -1,42 +1,36 @@
+"""\
+CLI adapter for running the Dealify pipeline analysis.
+
+Responsibilities:
+- Parse CLI arguments
+- Load runtime configuration
+- Invoke the pipeline execution flow (analysis + builders)
+- Persist outputs (JSON/TXT)
+
+Non-responsibilities:
+- Business rules, domain logic, and aggregations should live in dedicated modules
+  (analysis.py, management_builders.py, reports.py, etc.).
+
+Note:
+This module should remain thin so it can later be replaced by an API/worker adapter
+without changing the core behavior.
+"""
+
 from __future__ import annotations
 
-import os
+
+
 import argparse
-from datetime import datetime, date
-from pathlib import Path
+import os
 from dataclasses import dataclass
+from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Dict
 
-
-from python.app.config import load_config, get_llm_config
-from python.pipeline.mapping import load_mapping, map_dataframe
-from python.pipeline.analysis import run_analysis
-from python.pipeline.constants import (
-    COL_ACCOUNT,
-    COL_OPPORTUNITY,
-    COL_STAGE,
-    COL_FORECAST_CATEGORY,
-    COL_AMOUNT,
-    COL_CLOSE_DATE,
-    COL_CREATED_DATE,
-    COL_AE,
-    COL_NEXT_STEPS,
-    SF_EXPORT_TO_CANONICAL,
-)
-from python.pipeline.io import (
-    get_latest_csv,
-    load_csv,
-    write_reports,
-    write_management_data,
-)
-from python.pipeline.reports import build_ae_reports
-from python.pipeline.management import build_management_snapshot
-
+from python.app.config import get_llm_config, load_config
+from python.application.bootstrap_pipeline import run_pipeline_app
 
 DEFAULT_PIPELINE_MAPPING = "mappings/salesforce_pipeline.json"
-
-CALENDAR_CFG: Dict[str, Any] = {}
-RULES_CFG: Dict[str, Any] = {}
 
 
 @dataclass
@@ -51,17 +45,17 @@ class AnalysisContext:
     llm_config: Any
 
 
-def _get_calendar_cfg() -> Dict[str, Any]:
+def _get_calendar_cfg(calendar_cfg: Dict[str, Any] | None) -> Dict[str, Any]:
     # Defaults are safe fallbacks
-    cal = CALENDAR_CFG or {}
+    cal = calendar_cfg or {}
     return {
         "fiscal_year_start_month": int(cal.get("fiscal_year_start_month", 2)),
         "fiscal_year_start_day": int(cal.get("fiscal_year_start_day", 1)),
     }
 
 
-def _get_rules_cfg() -> Dict[str, Any]:
-    rules = RULES_CFG or {}
+def _get_rules_cfg(rules_cfg: Dict[str, Any] | None) -> Dict[str, Any]:
+    rules = rules_cfg or {}
     return {
         "next_step_low_score_threshold": float(rules.get("next_step_low_score_threshold", 5.0)),
         "horizon_days_short": int(rules.get("horizon_days_short", 14)),
@@ -99,7 +93,10 @@ def parse_args() -> argparse.Namespace:
         "--no-llm",
         "--skip-llm",
         action="store_true",
-        help="Sla de LLM Next Step health verrijking over (sneller, geen Ollama/SaaS nodig).",
+        help=(
+            "Sla LLM Next Step health verrijking over. Let op: analyse draait altijd zonder LLM; "
+            "verrijking gebeurt expliciet in de use case."
+        ),
     )
     parser.add_argument(
         "--output-scope",
@@ -116,29 +113,38 @@ def main() -> None:
 
     cfg = load_config()
 
-    # Keep global config for helper functions (compatible with current setup)
-    global CALENDAR_CFG, RULES_CFG
-    CALENDAR_CFG = cfg.get("calendar", {}) or {}
-    RULES_CFG = cfg.get("rules", {}) or {}
+    calendar_cfg = cfg.get("calendar", {}) or {}
+    rules_cfg = cfg.get("rules", {}) or {}
 
     data_dir = cfg["paths"]["data_dir_abs"]
     output_dir = cfg["paths"]["outputs_dir_abs"]
 
-    cal = _get_calendar_cfg()
-    rules = _get_rules_cfg()
+    cal = _get_calendar_cfg(calendar_cfg)
+    rules = _get_rules_cfg(rules_cfg)
 
     print(f"[pipeline] Data dir (config): {data_dir}")
     print(f"[pipeline] Output dir (config): {output_dir}")
-    print(f"[pipeline] Calendar (config): FY start {cal['fiscal_year_start_month']:02d}-{cal['fiscal_year_start_day']:02d}")
+    print(
+        f"[pipeline] Calendar (config): FY start {cal['fiscal_year_start_month']:02d}-{cal['fiscal_year_start_day']:02d}"
+    )
     print(
         f"[pipeline] Rules (config): horizon_short={rules['horizon_days_short']} "
         f"horizon_medium={rules['horizon_days_medium']} low_score<{rules['next_step_low_score_threshold']}"
     )
-    print("[pipeline] Run tip: python3 -m python.pipeline.pipeline_analyse")
+    print("[pipeline] Run tip: python3 -m python.entrypoints.cli.pipeline_analyse")
 
+    # CLI inputs (adapter layer)
     args = parse_args()
 
     print(f"[pipeline] Output scope (CLI): {args.output_scope}")
+
+    if args.no_llm:
+        print("[pipeline] LLM Next Step health verrijking is uitgeschakeld (--no-llm).")
+    else:
+        print(
+            "[pipeline] LLM Next Step health verrijking is ingeschakeld. "
+            "Analyse draait zonder LLM; verrijking gebeurt expliciet in de use case."
+        )
 
     # Determine today_value, optionally overridden via --today
     today_value = date.today()
@@ -166,53 +172,18 @@ def main() -> None:
         today=today_value,
         data_dir=data_dir or "",
         output_dir=output_dir or "",
-        calendar=_get_calendar_cfg(),
-        rules=_get_rules_cfg(),
+        calendar=cal,
+        rules=rules,
         team_target_current_quarter=float(team_target_value),
         bookings_to_date_current_quarter=float(bookings_to_date_value),
         llm_config=llm_cfg,
     )
 
-    csv_path = get_latest_csv(ctx.data_dir, name_contains="pipeline")
-    df = load_csv(csv_path)
-
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = Path(__file__).resolve().parents[3]
     mapping_path = args.mapping or str(project_root / DEFAULT_PIPELINE_MAPPING)
     print(f"[pipeline] Mapping gebruiken: {mapping_path}")
 
-    mapping_applied = False
-    try:
-        mapping = load_mapping(mapping_path)
-        df = map_dataframe(df, mapping)
-        mapping_applied = True
-        print("[pipeline] Mapping toegepast. Verwacht canonical kolommen.")
-    except Exception as e:
-        print("[pipeline][ERROR] Mapping stap faalde. Probeer Salesforce export te canonicalizen via fallback mapping.")
-        print(f"[pipeline][ERROR] Exception: {repr(e)}")
-
-    if not mapping_applied:
-        # Fallback: Salesforce export kolommen -> canonical kolommen
-        df = df.rename(columns={k: v for k, v in SF_EXPORT_TO_CANONICAL.items() if k in df.columns})
-        required = (COL_ACCOUNT, COL_OPPORTUNITY, COL_STAGE, COL_FORECAST_CATEGORY, COL_AMOUNT, COL_CLOSE_DATE, COL_CREATED_DATE, COL_AE, COL_NEXT_STEPS)
-        missing = [c for c in required if c not in df.columns]
-        if missing:
-            print(f"[pipeline][WAARSCHUWING] Niet alle canonical kolommen aanwezig na fallback canonicalize: {missing}")
-
-    active_df, bookings_df, omitted_df = run_analysis(ctx, df, enable_llm=not args.no_llm)
-
-    management_data = build_management_snapshot(
-        ctx,
-        active_df,
-        bookings_df,
-        omitted_df,
-        scope=args.output_scope,
-    )
-
-    report_text = build_ae_reports(ctx, active_df, bookings_df, omitted_df)
-    print("[pipeline] AE-rapport klaar, start schrijven naar files...")
-
-    write_reports(report_text, ctx.output_dir)
-    write_management_data(management_data, ctx.output_dir)
+    run_pipeline_app(ctx, args, mapping_path=mapping_path)
 
     print("Pipeline analyse voltooid. Output geschreven naar:")
     out_dir = ctx.output_dir or "outputs"

@@ -4,8 +4,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from python.pipeline.analysis import extract_health_score
-from python.pipeline.constants import (
+from python.domain.pipeline_intel.management_builders import extract_health_score
+from python.domain.pipeline_intel.constants import (
     COL_AE,
     COL_AMOUNT_CLEAN,
     COL_CLOSE_DATE_PARSED,

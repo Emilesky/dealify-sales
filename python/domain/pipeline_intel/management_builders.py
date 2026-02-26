@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from python.pipeline.constants import (
+from python.domain.pipeline_intel.constants import (
     COL_ACCOUNT,
     COL_OPPORTUNITY,
     COL_AE,
@@ -18,10 +18,35 @@ from python.pipeline.constants import (
     COL_FORECAST_CATEGORY,
     COL_NEXT_STEPS,
 )
-from python.pipeline.analysis import extract_health_score
+
+
 
 
 # === Helpers ===
+
+def extract_health_score(health: Any) -> float | None:
+    """Extract a numeric health score from a next_step_health value (dict, str, int, float)."""
+
+    if isinstance(health, (int, float)):
+        return float(health)
+
+    if isinstance(health, str):
+        try:
+            return float(health.strip())
+        except ValueError:
+            return None
+
+    if isinstance(health, dict):
+        score_raw = health.get("score")
+        if isinstance(score_raw, (int, float)):
+            return float(score_raw)
+        if isinstance(score_raw, str):
+            try:
+                return float(score_raw.strip())
+            except ValueError:
+                return None
+
+    return None
 
 def _safe_sum_amount(df: pd.DataFrame) -> float:
     if df is None or len(df) == 0 or COL_AMOUNT_CLEAN not in df.columns:

@@ -5,13 +5,14 @@ from typing import Any, Dict, Tuple
 
 import pandas as pd
 
-from python.pipeline.analysis import extract_health_score
-from python.pipeline.constants import (
+
+from python.domain.pipeline_intel.constants import (
     COL_AMOUNT_CLEAN,
     COL_CLOSE_DATE_PARSED,
     COL_NEXT_STEPS,
 )
-from python.pipeline.management_builders import (
+from python.domain.pipeline_intel.management_builders import (
+    extract_health_score,
     build_team_overview,
     build_deals_closing_next_14_days,
     build_quarter_concentration,

@@ -28,7 +28,6 @@ DealifyEngine/
 │  │  ├─ management_builders.py
 │  │  ├─ mapping.py
 │  │  ├─ next_step_health.py
-│  │  ├─ pipeline_analyse.py
 │  │  └─ reports.py
 │  ├─ weekly/
 │  │  ├─ weekly_filter.py
@@ -112,7 +111,7 @@ End-to-end flow
 
 Leest pipeline- en bookings-CSV’s en genereert managementdata.
 
-python -m python.pipeline.pipeline_analyse
+python -m python.entrypoints.cli.pipeline_analyse
 
 Output:
 	•	outputs/pipeline_management_data_latest.json
