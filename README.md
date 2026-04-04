@@ -1,3 +1,23 @@
+Update 2026-04-04
+
+Praktische samenvatting op basis van de actuele codebase op `main`:
+
+- Primaire operator-run is `python -m python.pipeline.pipeline_analyse` vanuit de projectroot.
+- De analyse leest de nieuwste CSV in `data/` met `pipeline` in de bestandsnaam.
+- Standaard outputs zijn:
+  - `outputs/ae_pipeline_summary_latest.txt`
+  - `outputs/pipeline_management_data_latest.json`
+- `python -m python.scripts.sf_salesforce_dashboard` kopieert CSV-bestanden uit `~/Downloads` naar `data/`.
+- Dit script haalt zowel een pipeline-bestand als een bookings-bestand op, maar in de huidige standaard analyse is alleen hard bevestigd dat het nieuwste `pipeline`-bestand wordt ingelezen.
+- De pipeline kan draaien met of zonder LLM:
+  - met LLM: standaard next-step health verrijking
+  - zonder LLM: gebruik `--no-llm`
+- Voor de standaard run is minimaal `pandas` nodig. Voor de optionele LiteLLM-codepath is ook `litellm` nodig.
+- Er is nu een `requirements.txt` aanwezig met de extern bevestigde Python-packages uit de codebase.
+- Onzekerheid die relevant blijft:
+  - de weekly-flow in deze README sluit niet volledig aan op de standaard `output_scope=management` van `pipeline_analyse`
+  - daarom is de weekly-flow niet volledig als standaard operatorflow te bevestigen zonder extra keuzes zoals `--output-scope extended`
+
 Salesforce AI Sales Intelligence
 
 Lokale Python-based AI sales intelligence tool voor het analyseren van CRM-exportdata (CSV) en het genereren van wekelijkse managementinzichten met behulp van een LLM (Ollama of SaaS).
