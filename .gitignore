@@ -20,7 +20,13 @@ venv/
 
 # Outputs / data (jij wil dit meestal niet versionen)
 data/
+!data/
 outputs/
+!data/weekly_attention/
+data/weekly_attention/ae_inputs.csv
+data/weekly_attention/settings.json
+!data/weekly_attention/*.template.csv
+!data/weekly_attention/*.template.json
 
 # Logs
 *.log

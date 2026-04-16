@@ -1,0 +1,29 @@
+{
+  "supported_view_default": "weekly",
+  "fallback_coverage_factor": 1.0,
+  "fallback_active_view": "weekly",
+  "next_step_health": {
+    "good_min": 7.0,
+    "watch_min": 5.0,
+    "poor_max": 5.0
+  },
+  "action_thresholds": {
+    "monitor_min": 1.0,
+    "ae_attention_min": 2.0,
+    "manager_attention_min": 3.0,
+    "urgent_manager_attention_min": 4.0
+  },
+  "forecast_priority_weights": {
+    "commit": 1.0,
+    "green_upside": 0.8,
+    "upside": 0.6,
+    "other": 0.3
+  },
+  "amount_weights": {
+    "small_max": 25000.0,
+    "medium_max": 100000.0,
+    "small_weight": 0.5,
+    "medium_weight": 1.0,
+    "large_weight": 1.5
+  }
+}

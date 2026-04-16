@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import argparse
 from datetime import datetime, date
 from pathlib import Path
@@ -8,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Dict
 
 
-from python.app.config import load_config, get_llm_config
+from python.app.config import load_config, get_llm_config, load_weekly_attention_config
 from python.pipeline.mapping import load_mapping, map_dataframe
 from python.pipeline.analysis import run_analysis
 from python.pipeline.constants import (
@@ -31,6 +32,11 @@ from python.pipeline.io import (
 )
 from python.pipeline.reports import build_ae_reports
 from python.pipeline.management import build_management_snapshot
+from python.pipeline.weekly_attention_signals import build_weekly_attention_signals
+from python.pipeline.weekly_attention_engine import (
+    build_weekly_attention_ae_inputs,
+    apply_weekly_attention_actions,
+)
 
 
 DEFAULT_PIPELINE_MAPPING = "mappings/salesforce_pipeline.json"
@@ -207,17 +213,32 @@ def main() -> None:
         omitted_df,
         scope=args.output_scope,
     )
+    weekly_attention_config = load_weekly_attention_config(cfg)
+    weekly_attention_signals = build_weekly_attention_signals(ctx, active_df, weekly_attention_config)
+    weekly_attention_ae_inputs = build_weekly_attention_ae_inputs(
+        weekly_attention_signals,
+        bookings_df,
+        weekly_attention_config,
+    )
+    weekly_attention_actions = apply_weekly_attention_actions(
+        weekly_attention_ae_inputs,
+        weekly_attention_config,
+    )
 
     report_text = build_ae_reports(ctx, active_df, bookings_df, omitted_df)
     print("[pipeline] AE-rapport klaar, start schrijven naar files...")
 
     write_reports(report_text, ctx.output_dir)
     write_management_data(management_data, ctx.output_dir)
+    weekly_attention_path = os.path.join(ctx.output_dir, "weekly_ae_attention_latest.json")
+    with open(weekly_attention_path, "w", encoding="utf-8") as f:
+        json.dump(weekly_attention_actions, f, ensure_ascii=False, indent=2)
 
     print("Pipeline analyse voltooid. Output geschreven naar:")
     out_dir = ctx.output_dir or "outputs"
     print(f" - {os.path.join(out_dir, 'ae_pipeline_summary_latest.txt')}")
     print(f" - {os.path.join(out_dir, 'pipeline_management_data_latest.json')}")
+    print(f" - {os.path.join(out_dir, 'weekly_ae_attention_latest.json')}")
 
 
 if __name__ == "__main__":
